@@ -145,7 +145,8 @@ LONG APIENTRY DrvDescribePixelFormat(HDC hdc, INT format, ULONG size,
   *descriptor = (PIXELFORMATDESCRIPTOR){
       .nSize = sizeof(*descriptor),
       .nVersion = 1,
-      .dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER,
+      .dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER |
+                 PFD_SUPPORT_COMPOSITION,
       .iPixelType = PFD_TYPE_RGBA,
       .cColorBits = 32,
       .cRedBits = 8,
