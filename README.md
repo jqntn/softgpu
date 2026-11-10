@@ -32,4 +32,4 @@ scripts\install.ps1
 scripts\uninstall.ps1
 ```
 
-`install.ps1` makes softgpu the OpenGL driver of every display adapter, for 64-bit and 32-bit apps. Every OpenGL app uses it until `uninstall.ps1` restores the original drivers. Both take effect after a reboot or a restart of the display driver. A GPU driver update also undoes the install.
+`install.ps1` makes softgpu the OpenGL driver of every display adapter, for 64-bit and 32-bit apps. Every OpenGL app uses it until `uninstall.ps1` restores the original drivers. Both restart the display drivers to apply the change at once, so the screen goes black for a few seconds and apps using the GPU may lose their state. A GPU driver update also undoes the install.
