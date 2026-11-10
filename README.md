@@ -15,9 +15,9 @@ cmake --build build-x86
 
 ## Test
 
-`build\harness` loads the driver directly, clears a window to a color and checks the pixel. It prints `ok` on success.
+`build\harness` loads the driver directly, clears a window, draws a triangle and checks a pixel inside and outside it. It prints `ok` on success.
 
-`build\wgltest` runs the same check as an ordinary OpenGL app, through `opengl32.dll`. It needs softgpu installed and fails unless the renderer is softgpu.
+`build\wgltest` is an ordinary OpenGL app that goes through `opengl32.dll`, clears a window and checks the pixel. It needs softgpu installed and fails unless the renderer is softgpu.
 
 ## Sample
 
