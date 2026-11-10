@@ -6,6 +6,10 @@
 typedef void(APIENTRY* ClearColorFn)(GLclampf, GLclampf, GLclampf, GLclampf);
 typedef void(APIENTRY* ClearFn)(GLbitfield);
 typedef GLboolean(APIENTRY* IsEnabledFn)(GLenum);
+typedef void(APIENTRY* BeginFn)(GLenum);
+typedef void(APIENTRY* Color3fFn)(GLfloat, GLfloat, GLfloat);
+typedef void(APIENTRY* Vertex2fFn)(GLfloat, GLfloat);
+typedef void(APIENTRY* EndFn)(void);
 
 static const char* const kExports[] = {
     "DrvValidateVersion",
@@ -31,6 +35,15 @@ static const char* const kExports[] = {
 static void Fail(const char* message) {
   fprintf(stderr, "%s\n", message);
   exit(EXIT_FAILURE);
+}
+
+static void ExpectPixel(HDC hdc, int x, int y, COLORREF expected) {
+  COLORREF pixel = GetPixel(hdc, x, y);
+  if (pixel != expected) {
+    fprintf(stderr, "pixel (%d, %d) is %06lx, expected %06lx\n", x, y, pixel,
+            expected);
+    exit(EXIT_FAILURE);
+  }
 }
 
 int main(void) {
@@ -71,17 +84,21 @@ int main(void) {
   if (((IsEnabledFn)table->entries[kGlIsEnabled])(GL_DEPTH_TEST) != GL_FALSE) {
     Fail("stub returned nonzero");
   }
+  ((BeginFn)table->entries[kGlBegin])(GL_TRIANGLES);
+  ((Color3fFn)table->entries[kGlColor3f])(0.0f, 0.0f, 1.0f);
+  ((Vertex2fFn)table->entries[kGlVertex2f])(-1.0f, -1.0f);
+  ((Vertex2fFn)table->entries[kGlVertex2f])(-1.0f, 1.0f);
+  ((Vertex2fFn)table->entries[kGlVertex2f])(1.0f, -1.0f);
+  ((EndFn)table->entries[kGlEnd])();
   if (!DrvSwapBuffers(hdc)) {
     Fail("swap failed");
   }
   GdiFlush();
 
-  COLORREF pixel = GetPixel(hdc, 0, 0);
-  if (pixel != RGB(255, 128, 64)) {
-    fprintf(stderr, "pixel is %06lx, expected %06lx\n", pixel,
-            RGB(255, 128, 64));
-    return EXIT_FAILURE;
-  }
+  RECT rect;
+  GetClientRect(window, &rect);
+  ExpectPixel(hdc, 2, rect.bottom - 3, RGB(0, 0, 255));
+  ExpectPixel(hdc, rect.right - 3, 2, RGB(255, 128, 64));
 
   DrvReleaseContext(context);
   DrvDeleteContext(context);
