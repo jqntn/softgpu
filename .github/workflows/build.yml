@@ -10,11 +10,16 @@ jobs:
       - run: pipx run --spec clang-format==22.1.3 clang-format --dry-run --Werror src/*.c src/*.h
 
   build:
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [cl, clang, gcc]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
       - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
-      - run: cmake -B build -G Ninja
+      - run: cmake -B build -G Ninja -DCMAKE_C_COMPILER=${{ matrix.compiler }}
       - run: cmake --build build
-      - run: pipx run --spec clang-tidy==22.1.8 clang-tidy -p build src/*.c
+      - if: matrix.compiler == 'cl'
+        run: pipx run --spec clang-tidy==22.1.8 clang-tidy -p build src/*.c
         shell: bash
