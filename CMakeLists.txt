@@ -6,6 +6,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_library(softgpu SHARED src/icd.c)
 set_target_properties(softgpu PROPERTIES PREFIX "")
 target_compile_definitions(softgpu PRIVATE SOFTGPU_BUILD)
+target_compile_options(softgpu
+                       PRIVATE $<$<C_COMPILER_ID:MSVC>:/experimental:c11atomics>)
 
 add_executable(harness src/harness.c)
 target_link_libraries(harness PRIVATE softgpu)

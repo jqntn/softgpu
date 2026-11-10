@@ -1,5 +1,6 @@
 #include "icd.h"
 
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,7 +10,6 @@ _Static_assert(sizeof(void*) == 8, "softgpu builds for x64 only");
 enum { kMaxContexts = 64, kPixelFormatCount = 1 };
 
 typedef struct Context {
-  LONG volatile used;
   int width;
   int height;
   uint32_t* pixels;
@@ -17,6 +17,7 @@ typedef struct Context {
 } Context;
 
 static Context contexts[kMaxContexts];
+static atomic_int used[kMaxContexts];
 static _Thread_local Context* current;
 
 static void Fail(const char* message) {
@@ -79,7 +80,7 @@ static ProcTable table = {
 };
 
 static Context* Lookup(ULONG handle) {
-  if (handle == 0 || handle > kMaxContexts || !contexts[handle - 1].used) {
+  if (handle == 0 || handle > kMaxContexts || !atomic_load(&used[handle - 1])) {
     return NULL;
   }
   return &contexts[handle - 1];
@@ -148,7 +149,8 @@ BOOL APIENTRY DrvSetPixelFormat(HDC hdc, LONG format) {
 
 ULONG APIENTRY DrvCreateContext(HDC hdc) {
   for (ULONG i = 0; i < kMaxContexts; i++) {
-    if (InterlockedCompareExchange(&contexts[i].used, 1, 0) == 0) {
+    int expected = 0;
+    if (atomic_compare_exchange_strong(&used[i], &expected, 1)) {
       return i + 1;
     }
   }
@@ -168,8 +170,8 @@ BOOL APIENTRY DrvDeleteContext(ULONG handle) {
     current = NULL;
   }
   free(context->pixels);
-  *context = (Context){.used = 1};
-  InterlockedExchange(&context->used, 0);
+  *context = (Context){0};
+  atomic_store(&used[handle - 1], 0);
   return TRUE;
 }
 

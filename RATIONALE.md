@@ -6,17 +6,19 @@ softgpu is a software GPU for Windows: an OpenGL installable client driver (ICD)
 
 - **Ultra simple.** Write the smallest code that does the job. Add an abstraction, option or helper only when code needs it. Prefer deletion to addition.
 - **Own implementation.** No Mesa or other OpenGL implementation. Khronos tools are allowed.
+- **Standard C first.** Use standard C over the Win32 API when both do the job.
 - **Fail early and explicitly.** A bad API call returns the error value that WGL or OpenGL defines. Running out of memory stops the process with a message.
 - **Windows x64 only.** The ICD interface exists only on Windows. The build fails on other targets.
 - **Any Windows toolchain.** MSVC, clang and MinGW-w64 GCC. CI builds with all three.
 
 ## Code
 
-- **C11.** `_Thread_local` holds the current context and `_Static_assert` guards the target. CMake passes the compiler's C11 flag.
+- **C11.** `_Thread_local` holds the current context, `<stdatomic.h>` claims context slots and `_Static_assert` guards the target. CMake passes the compiler's C11 flag.
 
 ## Build
 
 - **DLL name.** The ICD is `softgpu.dll` on every toolchain. MinGW would otherwise name it `libsoftgpu.dll`.
+- **C11 atomics on MSVC.** MSVC still marks them experimental, so CMake passes `/experimental:c11atomics` to MSVC only.
 - **System libraries.** CMake links `kernel32`, `user32` and `gdi32` by default on every Windows toolchain, so no target lists them.
 - **Compile commands.** CMake exports `compile_commands.json`, so clang-tidy sees the same defines, standard and include paths as the compiler.
 - **Format.** clang-format uses Google style, left pointer alignment and braces on every control statement. `IncludeBlocks: Preserve` keeps `<windows.h>` before `<GL/gl.h>`. Files use LF line endings.
