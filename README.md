@@ -12,4 +12,15 @@ build\harness
 
 `harness` loads the driver directly, clears the window to a color and checks the pixel. It prints `ok` on success.
 
-`wgltest` is an ordinary OpenGL app. It goes through `opengl32.dll`, so it needs the display adapter's `OpenGLDriverName` (x64) or `OpenGLDriverNameWow` (x86) to point at `softgpu.dll`. It fails unless the renderer is softgpu, then runs the same check.
+`wgltest` is an ordinary OpenGL app. It goes through `opengl32.dll`, so it needs softgpu installed as the system's OpenGL driver. It fails unless the renderer is softgpu, then runs the same check.
+
+## Install
+
+Build `build` (x64) and `build-x86` (x86), then run from an elevated PowerShell:
+
+```powershell
+scripts\install.ps1
+scripts\uninstall.ps1
+```
+
+`install.ps1` makes softgpu the OpenGL driver of every display adapter, for 64-bit and 32-bit apps. Every OpenGL app uses it until `uninstall.ps1` restores the original drivers. A GPU driver update also undoes the install. If script execution is disabled, run `powershell -ExecutionPolicy Bypass -File scripts\install.ps1`.
