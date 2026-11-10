@@ -1,35 +1,31 @@
 # softgpu
 
-A software GPU for Windows: an OpenGL driver (ICD) in plain C that renders on the CPU.
+A software GPU for Windows: an OpenGL driver in plain C that renders on the CPU.
 
 ## Build
 
-Requires CMake 3.28+ and a C11 compiler: MSVC, clang or MinGW-w64 GCC. CMake fetches GLFW for the samples. With MSVC, use the Developer Command Prompt of each architecture. 32-bit apps need the x86 build.
+Requires CMake 3.28+ and MSVC, clang or MinGW-w64 GCC. With MSVC, use the Developer Command Prompt of the target architecture.
 
 ```sh
 cmake -B build -G Ninja
 cmake --build build
-cmake -B build-x86 -G Ninja
-cmake --build build-x86
 ```
 
-## Test
+For 32-bit apps, also build x86 in `build-x86`.
 
-`build\harness` loads the driver directly, clears a window, draws a triangle and checks a pixel inside and outside it. It prints `ok` on success.
+## Run
 
-`build\wgltest` is an ordinary OpenGL app that goes through `opengl32.dll`, clears a window and checks the pixel. It needs softgpu installed and fails unless the renderer is softgpu.
-
-## Samples
-
-`build\triangle` draws a colored triangle with GLFW and OpenGL 1.1. With softgpu installed, softgpu renders it.
+- `build\harness` tests the driver directly.
+- `build\wgltest` tests it through `opengl32.dll` once installed.
+- `build\triangle` draws a triangle with GLFW.
 
 ## Install
 
-With both builds done, run from an elevated PowerShell:
+From an elevated PowerShell, with both builds:
 
 ```powershell
 scripts\install.ps1
 scripts\uninstall.ps1
 ```
 
-`install.ps1` makes softgpu the OpenGL driver of every display adapter, for 64-bit and 32-bit apps. Every OpenGL app uses it until `uninstall.ps1` restores the original drivers. Both restart the display drivers to apply the change at once, so the screen goes black for a few seconds and apps using the GPU may lose their state. A GPU driver update also undoes the install.
+softgpu then drives every OpenGL app until uninstalled or until a GPU driver update. Both scripts restart the display drivers, so the screen goes black for a few seconds and GPU apps may lose their state.
