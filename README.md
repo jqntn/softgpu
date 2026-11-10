@@ -21,7 +21,7 @@ cmake --build build-x86
 
 ## Sample
 
-`build\triangle` draws a colored triangle with GLFW and OpenGL 1.1. With softgpu installed, it shows only the clear color until softgpu draws triangles, and it reports the calls softgpu does not implement yet.
+`build\triangle` draws a colored triangle with GLFW and OpenGL 1.1. With softgpu installed, softgpu renders it.
 
 ## Install
 

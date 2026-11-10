@@ -38,12 +38,19 @@ softgpu is a software GPU for Windows: an OpenGL installable client driver (ICD)
 - **Pixel format.** One format: RGBA8, double-buffered, drawn to a window. It sets `PFD_SUPPORT_COMPOSITION`, as Mesa does. Without it, `opengl32.dll` never calls `DrvCreateContext`, because Windows 8 and later always composite the desktop. It has no depth or stencil yet, so `ChoosePixelFormat` skips it unless the app sets `PFD_DEPTH_DONTCARE`, as `wgltest` does.
 - **Framebuffer.** It lives in the context and matches the window's client area at make-current and after each swap. It is a bottom-up 32-bit DIB, so rows are in GL order. `StretchDIBits` presents it.
 
+## Rasterizer
+
+- **Immediate mode.** `glBegin(GL_TRIANGLES)`, `glColor3f` and `glVertex2f` fill a three-vertex buffer, and every third vertex draws a triangle at once. Other primitive modes report themselves as unimplemented. There are no matrices yet, so vertices are in clip space with w = 1.
+- **Viewport.** It starts at the window size when the context first becomes current. Window coordinates clamp to a guard band of 2^19 pixels, which keeps the fixed-point math within 64 bits. Real clipping comes with matrices.
+- **Triangles.** Edge functions in 64-bit fixed point with 4 subpixel bits, sampled at pixel centers. Both windings draw, because culling is off by default. A top-left rule in GL's y-up space keeps shared edges from being drawn twice. Colors interpolate linearly from barycentric weights, which is exact while w = 1.
+- **Flush.** `glFlush` does nothing, because drawing is synchronous.
+
 ## Development
 
 - **Layout.** `src` holds the driver, `test` the checks and `sample` the demos.
-- **harness** links the ICD directly and plays the part of `opengl32.dll`. It checks the exports, clears to a color, swaps and reads the pixel back. Nothing touches the registry. CI runs it for every toolchain and architecture.
+- **harness** links the ICD directly and plays the part of `opengl32.dll`. It checks the exports, clears, draws a triangle, swaps and reads back one pixel inside the triangle and one outside. Nothing touches the registry. CI runs it for every toolchain and architecture.
 - **wgltest** is an ordinary WGL app linked against `opengl32.dll`, so it checks the whole chain once the registry points at softgpu. It fails unless `GL_RENDERER` is `softgpu`, then clears, swaps and reads the pixel back. The x86 build checks `OpenGLDriverNameWow`. CI builds it but cannot run it, because the runner has no softgpu registration.
-- **triangle** in `sample` draws a colored triangle with GLFW and GL 1.1 immediate mode. It is the first rendering milestone. GLFW chooses the pixel format itself and skips GDI Generic, so it picks softgpu's format without depth. CI builds it but cannot run it, because it loops until its window closes.
+- **triangle** in `sample` draws a colored triangle with GLFW and GL 1.1 immediate mode. softgpu renders it. GLFW chooses the pixel format itself and skips GDI Generic, so it picks softgpu's format without depth. CI builds it but cannot run it, because it loops until its window closes.
 - **Reports.** Errors and unimplemented calls go to `stderr`. GUI games inherit it too, so redirect it at launch: `game.exe 2> softgpu.log` in cmd, or `Start-Process game.exe -RedirectStandardError softgpu.log -Wait` in PowerShell. PowerShell's `2>` captures nothing from a GUI app.
 - **Install.** `scripts/install.ps1` points `OpenGLDriverName` and `OpenGLDriverNameWow` of every display adapter with an OpenGL driver at the x64 and x86 builds, after it checks each DLL's architecture. It keeps the original values beside them as `SoftgpuOpenGLDriverName` and `SoftgpuOpenGLDriverNameWow`, and a second run keeps the first backup. It keeps each value's registry type. `scripts/uninstall.ps1` restores the originals, unless a driver update already replaced softgpu. Both need an elevated PowerShell and work in Windows PowerShell 5.1 and PowerShell 7. A GPU driver update undoes the install. Windows caches the driver name when the display driver starts, so installing and uninstalling take effect after a reboot or a restart of the display device (`pnputil /restart-device <instance id>`).
 
@@ -70,4 +77,4 @@ softgpu is a software GPU for Windows: an OpenGL installable client driver (ICD)
 | Framebuffer per window | An app draws into one window from two contexts, or swaps a DC that is not current. |
 | Log file | A game that only starts through a launcher, so nobody can redirect its `stderr`. |
 | Depth and stencil formats | Depth testing, or the first real app, since apps rarely set `PFD_DEPTH_DONTCARE`. |
-| SIMD clear | A profile shows it. |
+| SIMD clear and rasterizer | A profile shows it. |
