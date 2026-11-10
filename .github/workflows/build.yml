@@ -14,12 +14,25 @@ jobs:
       fail-fast: false
       matrix:
         compiler: [cl, clang, gcc]
+        arch: [x64, x86]
+        include:
+          - compiler: clang
+            arch: x86
+            flags: -DCMAKE_C_COMPILER_TARGET=i686-pc-windows-msvc
+    name: build (${{ matrix.compiler }}, ${{ matrix.arch }})
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
       - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
-      - run: cmake -B build -G Ninja -DCMAKE_C_COMPILER=${{ matrix.compiler }}
+        with:
+          arch: ${{ matrix.arch }}
+      - if: matrix.compiler == 'gcc' && matrix.arch == 'x86'
+        run: |
+          C:\msys64\usr\bin\pacman.exe -Sy --noconfirm --needed mingw-w64-i686-gcc
+          Add-Content $env:GITHUB_PATH C:\msys64\mingw32\bin
+      - run: cmake -B build -G Ninja -DCMAKE_C_COMPILER=${{ matrix.compiler }} ${{ matrix.flags }}
       - run: cmake --build build
-      - if: matrix.compiler == 'cl'
+      - run: build/harness
+      - if: matrix.compiler == 'cl' && matrix.arch == 'x64'
         run: pipx run --spec clang-tidy==22.1.8 clang-tidy -p build src/*.c
         shell: bash
