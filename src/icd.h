@@ -3,14 +3,6 @@
 
 #include <windows.h>
 
-#ifdef SOFTGPU_BUILD
-#define SOFTGPU_API __declspec(dllexport)
-#else
-#define SOFTGPU_API __declspec(dllimport)
-#endif
-
-#include <GL/gl.h>
-
 #define SOFTGPU_GL11(X)                                                       \
   X(void, NewList, (GLuint list, GLenum mode), )                              \
   X(void, EndList, (void), )                                                  \
@@ -414,6 +406,8 @@
   X(void, PopClientAttrib, (void), )                                          \
   X(void, PushClientAttrib, (GLbitfield mask), )
 
+#include <GL/gl.h>
+
 #define SOFTGPU_ENTRY(ret, name, params, value) kGl##name,
 typedef enum GlEntry { SOFTGPU_GL11(SOFTGPU_ENTRY) kGlEntryCount } GlEntry;
 #undef SOFTGPU_ENTRY
@@ -423,33 +417,27 @@ typedef struct ProcTable {
   PROC entries[kGlEntryCount];
 } ProcTable;
 
-SOFTGPU_API BOOL APIENTRY DrvValidateVersion(ULONG version);
-SOFTGPU_API void APIENTRY DrvSetCallbackProcs(INT count, PROC* procs);
-SOFTGPU_API LONG APIENTRY DrvDescribePixelFormat(
-    HDC hdc, INT format, ULONG size, PIXELFORMATDESCRIPTOR* descriptor);
-SOFTGPU_API BOOL APIENTRY DrvSetPixelFormat(HDC hdc, LONG format);
-SOFTGPU_API ULONG APIENTRY DrvCreateContext(HDC hdc);
-SOFTGPU_API ULONG APIENTRY DrvCreateLayerContext(HDC hdc, INT layer);
-SOFTGPU_API BOOL APIENTRY DrvDeleteContext(ULONG handle);
-SOFTGPU_API BOOL APIENTRY DrvCopyContext(ULONG source, ULONG destination,
-                                         UINT mask);
-SOFTGPU_API BOOL APIENTRY DrvShareLists(ULONG first, ULONG second);
-SOFTGPU_API ProcTable* APIENTRY DrvSetContext(HDC hdc, ULONG handle,
-                                              PROC set_proc_table);
-SOFTGPU_API BOOL APIENTRY DrvReleaseContext(ULONG handle);
-SOFTGPU_API PROC APIENTRY DrvGetProcAddress(LPCSTR name);
-SOFTGPU_API BOOL APIENTRY DrvSwapBuffers(HDC hdc);
-SOFTGPU_API BOOL APIENTRY DrvSwapLayerBuffers(HDC hdc, UINT planes);
-SOFTGPU_API BOOL APIENTRY DrvDescribeLayerPlane(HDC hdc, INT format, INT layer,
-                                                UINT size,
-                                                LAYERPLANEDESCRIPTOR* plane);
-SOFTGPU_API INT APIENTRY DrvSetLayerPaletteEntries(HDC hdc, INT layer,
-                                                   INT start, INT count,
-                                                   const COLORREF* colors);
-SOFTGPU_API INT APIENTRY DrvGetLayerPaletteEntries(HDC hdc, INT layer,
-                                                   INT start, INT count,
-                                                   COLORREF* colors);
-SOFTGPU_API BOOL APIENTRY DrvRealizeLayerPalette(HDC hdc, INT layer,
-                                                 BOOL realize);
+BOOL APIENTRY DrvValidateVersion(ULONG version);
+void APIENTRY DrvSetCallbackProcs(INT count, PROC* procs);
+LONG APIENTRY DrvDescribePixelFormat(HDC hdc, INT format, ULONG size,
+                                     PIXELFORMATDESCRIPTOR* descriptor);
+BOOL APIENTRY DrvSetPixelFormat(HDC hdc, LONG format);
+ULONG APIENTRY DrvCreateContext(HDC hdc);
+ULONG APIENTRY DrvCreateLayerContext(HDC hdc, INT layer);
+BOOL APIENTRY DrvDeleteContext(ULONG handle);
+BOOL APIENTRY DrvCopyContext(ULONG source, ULONG destination, UINT mask);
+BOOL APIENTRY DrvShareLists(ULONG first, ULONG second);
+ProcTable* APIENTRY DrvSetContext(HDC hdc, ULONG handle, PROC set_proc_table);
+BOOL APIENTRY DrvReleaseContext(ULONG handle);
+PROC APIENTRY DrvGetProcAddress(LPCSTR name);
+BOOL APIENTRY DrvSwapBuffers(HDC hdc);
+BOOL APIENTRY DrvSwapLayerBuffers(HDC hdc, UINT planes);
+BOOL APIENTRY DrvDescribeLayerPlane(HDC hdc, INT format, INT layer, UINT size,
+                                    LAYERPLANEDESCRIPTOR* plane);
+INT APIENTRY DrvSetLayerPaletteEntries(HDC hdc, INT layer, INT start, INT count,
+                                       const COLORREF* colors);
+INT APIENTRY DrvGetLayerPaletteEntries(HDC hdc, INT layer, INT start, INT count,
+                                       COLORREF* colors);
+BOOL APIENTRY DrvRealizeLayerPalette(HDC hdc, INT layer, BOOL realize);
 
 #endif

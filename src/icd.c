@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-_Static_assert(sizeof(void*) == 8, "softgpu builds for x64 only");
 _Static_assert(kGlEntryCount == 336, "GL 1.1 has 336 dispatch entries");
 
 enum { kMaxContexts = 64, kPixelFormatCount = 1 };

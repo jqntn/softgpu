@@ -3,9 +3,8 @@ project(softgpu C)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-add_library(softgpu SHARED src/icd.c)
+add_library(softgpu SHARED src/icd.c src/icd.def)
 set_target_properties(softgpu PROPERTIES PREFIX "")
-target_compile_definitions(softgpu PRIVATE SOFTGPU_BUILD)
 target_compile_options(softgpu
                        PRIVATE $<$<C_COMPILER_ID:MSVC>:/experimental:c11atomics>)
 
