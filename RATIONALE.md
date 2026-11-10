@@ -39,6 +39,7 @@ softgpu is a software GPU for Windows: an OpenGL installable client driver (ICD)
 ## Development
 
 - **harness** links the ICD directly and plays the part of `opengl32.dll`. It checks the exports, clears to a color, swaps and reads the pixel back. Nothing touches the registry.
+- **Reports.** Errors and unimplemented calls go to `stderr`. GUI games inherit it too, so redirect it at launch: `game.exe 2> softgpu.log` in cmd, or `Start-Process game.exe -RedirectStandardError softgpu.log -Wait` in PowerShell. PowerShell's `2>` captures nothing from a GUI app.
 - **Registry install** changes a system-wide setting. Back up the original value first. GPU driver updates overwrite it.
 
 ## Direction
@@ -63,6 +64,6 @@ softgpu is a software GPU for Windows: an OpenGL installable client driver (ICD)
 |---|---|
 | 32-bit build | A 32-bit game. It needs a `.def` file for the undecorated `__stdcall` exports, an x86 CI job and `OpenGLDriverNameWow`. |
 | Framebuffer per window | An app draws into one window from two contexts, or swaps a DC that is not current. |
-| Visible error messages | The first GUI app through the registry. `stderr` is invisible there. |
+| Log file | A game that only starts through a launcher, so nobody can redirect its `stderr`. |
 | Depth and stencil formats | Depth testing. |
 | SIMD clear | A profile shows it. |
