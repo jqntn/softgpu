@@ -2,6 +2,8 @@
 
 A software GPU for Windows: an OpenGL driver in plain C that renders on the CPU.
 
+![The triangle sample rendered by softgpu](samples/triangle.png)
+
 ## Build
 
 Requires CMake 3.28+ and MSVC, clang or MinGW-w64 GCC. With MSVC, use the Developer Command Prompt of the target architecture.
