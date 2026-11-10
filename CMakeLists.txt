@@ -25,7 +25,7 @@ target_link_libraries(harness PRIVATE softgpu)
 add_executable(wgltest test/wgltest.c)
 target_link_libraries(wgltest PRIVATE opengl32)
 
-add_executable(triangle sample/triangle.c)
+add_executable(triangle samples/triangle.c)
 target_link_libraries(triangle PRIVATE glfw opengl32)
 
 set_target_properties(softgpu harness wgltest triangle

@@ -6,7 +6,7 @@ softgpu is a software GPU for Windows: an OpenGL installable client driver (ICD)
 
 - **Ultra simple.** Write the smallest code that does the job. Add an abstraction, option or helper only when code needs it. Prefer deletion to addition.
 - **Own implementation.** No Mesa or other OpenGL implementation. Khronos tools are allowed.
-- **Self-contained.** The driver has no dependencies. CMake fetches the sample's GLFW as a tag archive with a SHA-256 hash, as ray does.
+- **Self-contained.** The driver has no dependencies. CMake fetches the samples' GLFW as a tag archive with a SHA-256 hash, as ray does.
 - **Standard C first.** Use standard C over the Win32 API when both do the job.
 - **Fail early and explicitly.** A bad API call returns the error value that WGL or OpenGL defines. Running out of memory stops the process with a message.
 - **Windows only.** The ICD interface exists only on Windows. softgpu builds for x86 and x64, because 32-bit games load a 32-bit driver.
@@ -47,10 +47,10 @@ softgpu is a software GPU for Windows: an OpenGL installable client driver (ICD)
 
 ## Development
 
-- **Layout.** `src` holds the driver, `test` the checks and `sample` the demos.
+- **Layout.** `src` holds the driver, `test` the checks and `samples` the demos.
 - **harness** links the ICD directly and plays the part of `opengl32.dll`. It checks the exports, clears, draws a triangle, swaps and reads back one pixel inside the triangle and one outside. Nothing touches the registry. CI runs it for every toolchain and architecture.
 - **wgltest** is an ordinary WGL app linked against `opengl32.dll`, so it checks the whole chain once the registry points at softgpu. It fails unless `GL_RENDERER` is `softgpu`, then clears, swaps and reads the pixel back. The x86 build checks `OpenGLDriverNameWow`. CI builds it but cannot run it, because the runner has no softgpu registration.
-- **triangle** in `sample` draws a colored triangle with GLFW and GL 1.1 immediate mode. softgpu renders it. GLFW chooses the pixel format itself and skips GDI Generic, so it picks softgpu's format without depth. CI builds it but cannot run it, because it loops until its window closes.
+- **triangle** in `samples` draws a colored triangle with GLFW and GL 1.1 immediate mode. softgpu renders it. GLFW chooses the pixel format itself and skips GDI Generic, so it picks softgpu's format without depth. CI builds it but cannot run it, because it loops until its window closes.
 - **Reports.** Errors and unimplemented calls go to `stderr`. GUI games inherit it too, so redirect it at launch: `game.exe 2> softgpu.log` in cmd, or `Start-Process game.exe -RedirectStandardError softgpu.log -Wait` in PowerShell. PowerShell's `2>` captures nothing from a GUI app.
 - **Install.** `scripts/install.ps1` points `OpenGLDriverName` and `OpenGLDriverNameWow` of every display adapter with an OpenGL driver at the x64 and x86 builds, after it checks each DLL's architecture. It keeps the original values beside them as `SoftgpuOpenGLDriverName` and `SoftgpuOpenGLDriverNameWow`, and a second run keeps the first backup. It keeps each value's registry type. `scripts/uninstall.ps1` restores the originals, unless a driver update already replaced softgpu. Both need an elevated PowerShell and work in Windows PowerShell 5.1 and PowerShell 7. A GPU driver update undoes the install. Windows caches the driver name when the display driver starts, so both scripts end with `scripts/restart.ps1`. It restarts every display device that has an OpenGL driver with `pnputil /restart-device`, which blanks the screen for a few seconds and resets the GPU for running apps. A device that cannot restart now restarts at the next reboot.
 
