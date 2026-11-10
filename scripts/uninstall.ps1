@@ -17,3 +17,5 @@ foreach ($adapter in Get-ChildItem $class -ErrorAction SilentlyContinue) {
     Remove-ItemProperty $adapter.PSPath "Softgpu$name"
   }
 }
+
+& "$PSScriptRoot\restart.ps1"

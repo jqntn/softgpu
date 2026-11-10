@@ -39,3 +39,5 @@ foreach ($adapter in $adapters) {
     "$($adapter.GetValue('DriverDesc')): $name -> $($dlls[$name])"
   }
 }
+
+& "$PSScriptRoot\restart.ps1"
