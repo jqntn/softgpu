@@ -3,13 +3,13 @@
 
 #include <windows.h>
 
-#include <GL/gl.h>
-
 #ifdef SOFTGPU_BUILD
 #define SOFTGPU_API __declspec(dllexport)
 #else
 #define SOFTGPU_API __declspec(dllimport)
 #endif
+
+#include <GL/gl.h>
 
 #define SOFTGPU_GL11(X)     \
   X(NewList)                \

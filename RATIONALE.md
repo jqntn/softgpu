@@ -21,7 +21,7 @@ softgpu is a software GPU for Windows: an OpenGL installable client driver (ICD)
 - **C11 atomics on MSVC.** MSVC still marks them experimental, so CMake passes `/experimental:c11atomics` to MSVC only.
 - **System libraries.** CMake links `kernel32`, `user32` and `gdi32` by default on every Windows toolchain, so no target lists them.
 - **Compile commands.** CMake exports `compile_commands.json`, so clang-tidy sees the same defines, standard and include paths as the compiler.
-- **Format.** clang-format uses Google style, left pointer alignment and braces on every control statement. `IncludeBlocks: Preserve` keeps `<windows.h>` before `<GL/gl.h>`. Files use LF line endings.
+- **Format.** clang-format uses Google style, left pointer alignment and braces on every control statement. `<GL/gl.h>` needs `<windows.h>` first, so it sits below the `SOFTGPU_API` block, where include sorting cannot move it. Files use LF line endings.
 - **Names.** clang-tidy enforces Google naming as errors, with the `SOFTGPU_` macro prefix.
 - **No comments in code.**
 - **Limits.** Use fixed-size arrays with explicit limits. Contexts live in a 64-slot array.
