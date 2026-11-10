@@ -4,7 +4,7 @@ A software GPU for Windows: an OpenGL driver (ICD) in plain C that renders on th
 
 ## Build
 
-Requires CMake 3.28+ and a C11 compiler: MSVC, clang or MinGW-w64 GCC. With MSVC, use the Developer Command Prompt of each architecture. 32-bit apps need the x86 build.
+Requires CMake 3.28+ and a C11 compiler: MSVC, clang or MinGW-w64 GCC. CMake fetches GLFW for the sample. With MSVC, use the Developer Command Prompt of each architecture. 32-bit apps need the x86 build.
 
 ```sh
 cmake -B build -G Ninja
@@ -18,6 +18,10 @@ cmake --build build-x86
 `build\harness` loads the driver directly, clears a window to a color and checks the pixel. It prints `ok` on success.
 
 `build\wgltest` runs the same check as an ordinary OpenGL app, through `opengl32.dll`. It needs softgpu installed and fails unless the renderer is softgpu.
+
+## Sample
+
+`build\triangle` draws a colored triangle with GLFW and OpenGL 1.1. With softgpu installed, it shows only the clear color until softgpu draws triangles, and it reports the calls softgpu does not implement yet.
 
 ## Install
 
