@@ -32,6 +32,9 @@ typedef struct Context {
   int viewport[4];
   float color[4];
   GLenum mode;
+  bool cull_face;
+  GLenum cull_face_mode;
+  GLenum front_face;
   bool drawing;
   int vertex_count;
   Vertex vertices[3];
@@ -130,6 +133,12 @@ static void DrawTriangle(Context* context) {
   if (area == 0) {
     return;
   }
+  GLenum face =
+      (area > 0) == (context->front_face == GL_CCW) ? GL_FRONT : GL_BACK;
+  if (context->cull_face && (context->cull_face_mode == face ||
+                             context->cull_face_mode == GL_FRONT_AND_BACK)) {
+    return;
+  }
   if (area < 0) {
     const Vertex* vertex = v[1];
     v[1] = v[2];
@@ -202,6 +211,33 @@ static void APIENTRY Viewport(GLint x, GLint y, GLsizei width, GLsizei height) {
   }
 }
 
+static void SetCapability(GLenum cap, bool value) {
+  static atomic_flag reported = ATOMIC_FLAG_INIT;
+  if (cap == GL_CULL_FACE) {
+    current->cull_face = value;
+  } else {
+    Unimplemented(&reported,
+                  "Enable or glDisable with a capability other than "
+                  "GL_CULL_FACE");
+  }
+}
+
+static void APIENTRY Enable(GLenum cap) { SetCapability(cap, true); }
+
+static void APIENTRY Disable(GLenum cap) { SetCapability(cap, false); }
+
+static void APIENTRY CullFace(GLenum mode) {
+  if (mode == GL_FRONT || mode == GL_BACK || mode == GL_FRONT_AND_BACK) {
+    current->cull_face_mode = mode;
+  }
+}
+
+static void APIENTRY FrontFace(GLenum mode) {
+  if (mode == GL_CW || mode == GL_CCW) {
+    current->front_face = mode;
+  }
+}
+
 static void APIENTRY Begin(GLenum mode) {
   static atomic_flag reported = ATOMIC_FLAG_INIT;
   if (mode != GL_TRIANGLES) {
@@ -261,8 +297,12 @@ static ProcTable table = {
             [kGlClear] = (PROC)Clear,
             [kGlClearColor] = (PROC)ClearColor,
             [kGlColor3f] = (PROC)Color3f,
+            [kGlCullFace] = (PROC)CullFace,
+            [kGlDisable] = (PROC)Disable,
+            [kGlEnable] = (PROC)Enable,
             [kGlEnd] = (PROC)End,
             [kGlFlush] = (PROC)Flush,
+            [kGlFrontFace] = (PROC)FrontFace,
             [kGlGetString] = (PROC)GetString,
             [kGlVertex2f] = (PROC)Vertex2f,
             [kGlViewport] = (PROC)Viewport,
@@ -342,7 +382,11 @@ ULONG APIENTRY DrvCreateContext(HDC hdc) {
   for (ULONG i = 0; i < kMaxContexts; i++) {
     int expected = 0;
     if (atomic_compare_exchange_strong(&used[i], &expected, 1)) {
-      contexts[i] = (Context){.color = {1.0f, 1.0f, 1.0f, 1.0f}};
+      contexts[i] = (Context){
+          .color = {1.0f, 1.0f, 1.0f, 1.0f},
+          .cull_face_mode = GL_BACK,
+          .front_face = GL_CCW,
+      };
       return i + 1;
     }
   }

@@ -37,7 +37,7 @@ softgpu is a software OpenGL driver for Windows, in plain C. Its goal is to run 
 
 - **No matrices yet.** Vertices are taken as normalized device coordinates with w = 1.
 - **Fixed point.** Edge functions in 64-bit with 4 subpixel bits. Without a clipper, window coordinates clamp to a guard band of 2^19 pixels, and products reach 2^48.
-- **Fill rule.** Both windings draw. A top-left rule in GL's y-up space draws shared edges once.
+- **Fill rule.** Both windings draw. `GL_CULL_FACE` culls by window-space winding, as `glFrontFace` and `glCullFace` set. A top-left rule in GL's y-up space draws shared edges once.
 
 ## Development
 

@@ -6,7 +6,7 @@
 typedef void(APIENTRY* ClearColorFn)(GLclampf, GLclampf, GLclampf, GLclampf);
 typedef void(APIENTRY* ClearFn)(GLbitfield);
 typedef GLboolean(APIENTRY* IsEnabledFn)(GLenum);
-typedef void(APIENTRY* BeginFn)(GLenum);
+typedef void(APIENTRY* EnumFn)(GLenum);
 typedef void(APIENTRY* Color3fFn)(GLfloat, GLfloat, GLfloat);
 typedef void(APIENTRY* Vertex2fFn)(GLfloat, GLfloat);
 typedef void(APIENTRY* EndFn)(void);
@@ -32,6 +32,11 @@ static const char* const kExports[] = {
     "DrvRealizeLayerPalette",
 };
 
+static const GLfloat kLowerLeftCw[] = {-1.0f, -1.0f, -1.0f, 1.0f, 1.0f, -1.0f};
+static const GLfloat kUpperRightCw[] = {-1.0f, 1.0f, 1.0f, 1.0f, 1.0f, -1.0f};
+static const GLfloat kUpperRightCcw[] = {-1.0f, 1.0f, 1.0f, -1.0f, 1.0f, 1.0f};
+static const GLfloat kCenterCcw[] = {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f};
+
 static void Fail(const char* message) {
   fprintf(stderr, "%s\n", message);
   exit(EXIT_FAILURE);
@@ -44,6 +49,16 @@ static void ExpectPixel(HDC hdc, int x, int y, COLORREF expected) {
             expected);
     exit(EXIT_FAILURE);
   }
+}
+
+static void Triangle(const ProcTable* table, GLfloat red, GLfloat green,
+                     GLfloat blue, const GLfloat vertices[6]) {
+  ((EnumFn)table->entries[kGlBegin])(GL_TRIANGLES);
+  ((Color3fFn)table->entries[kGlColor3f])(red, green, blue);
+  for (int i = 0; i < 6; i += 2) {
+    ((Vertex2fFn)table->entries[kGlVertex2f])(vertices[i], vertices[i + 1]);
+  }
+  ((EndFn)table->entries[kGlEnd])();
 }
 
 int main(void) {
@@ -84,12 +99,16 @@ int main(void) {
   if (((IsEnabledFn)table->entries[kGlIsEnabled])(GL_DEPTH_TEST) != GL_FALSE) {
     Fail("stub returned nonzero");
   }
-  ((BeginFn)table->entries[kGlBegin])(GL_TRIANGLES);
-  ((Color3fFn)table->entries[kGlColor3f])(0.0f, 0.0f, 1.0f);
-  ((Vertex2fFn)table->entries[kGlVertex2f])(-1.0f, -1.0f);
-  ((Vertex2fFn)table->entries[kGlVertex2f])(-1.0f, 1.0f);
-  ((Vertex2fFn)table->entries[kGlVertex2f])(1.0f, -1.0f);
-  ((EndFn)table->entries[kGlEnd])();
+  Triangle(table, 0.0f, 0.0f, 1.0f, kLowerLeftCw);
+  ((EnumFn)table->entries[kGlEnable])(GL_CULL_FACE);
+  Triangle(table, 0.0f, 1.0f, 0.0f, kCenterCcw);
+  Triangle(table, 1.0f, 0.0f, 0.0f, kUpperRightCw);
+  ((EnumFn)table->entries[kGlCullFace])(GL_FRONT);
+  Triangle(table, 1.0f, 0.0f, 0.0f, kUpperRightCcw);
+  ((EnumFn)table->entries[kGlFrontFace])(GL_CW);
+  Triangle(table, 1.0f, 0.0f, 0.0f, kUpperRightCw);
+  ((EnumFn)table->entries[kGlCullFace])(GL_FRONT_AND_BACK);
+  Triangle(table, 1.0f, 0.0f, 0.0f, kUpperRightCcw);
   if (!DrvSwapBuffers(hdc)) {
     Fail("swap failed");
   }
@@ -99,6 +118,7 @@ int main(void) {
   GetClientRect(window, &rect);
   ExpectPixel(hdc, 2, rect.bottom - 3, RGB(0, 0, 255));
   ExpectPixel(hdc, rect.right - 3, 2, RGB(255, 128, 64));
+  ExpectPixel(hdc, rect.right / 2 + 8, rect.bottom / 2 - 8, RGB(0, 255, 0));
 
   DrvReleaseContext(context);
   DrvDeleteContext(context);
