@@ -14,7 +14,7 @@ softgpu is a software GPU for Windows: an OpenGL installable client driver (ICD)
 ## Code
 
 - **C11.** `_Thread_local` holds the current context, `<stdatomic.h>` claims context slots and `_Static_assert` checks the size of the dispatch table. CMake passes the compiler's C11 flag.
-- **Format.** clang-format uses Google style, left pointer alignment and braces on every control statement. `<GL/gl.h>` needs `<windows.h>` first, so it sits below the `SOFTGPU_GL11` X-macro, where include sorting cannot move it. Files use LF line endings.
+- **Format.** clang-format uses Google style, left pointer alignment and braces on every control statement. `<GL/gl.h>` needs `<windows.h>` first, so each file puts code between them, where include sorting cannot reorder them: the `SOFTGPU_GL11` X-macro in `icd.h`, the pixel format in `wgltest.c`. Files use LF line endings.
 - **Names.** clang-tidy enforces Google naming as errors, with the `SOFTGPU_` macro prefix.
 - **No comments in code.**
 - **Limits.** Use fixed-size arrays with explicit limits. Contexts live in a 64-slot array.
@@ -40,6 +40,7 @@ softgpu is a software GPU for Windows: an OpenGL installable client driver (ICD)
 ## Development
 
 - **harness** links the ICD directly and plays the part of `opengl32.dll`. It checks the exports, clears to a color, swaps and reads the pixel back. Nothing touches the registry. CI runs it for every toolchain and architecture.
+- **wgltest** is an ordinary WGL app linked against `opengl32.dll`, so it checks the whole chain once the registry points at softgpu. It fails unless `GL_RENDERER` is `softgpu`, then clears, swaps and reads the pixel back. The x86 build checks `OpenGLDriverNameWow`. CI builds it but cannot run it, because the runner has no softgpu registration.
 - **Reports.** Errors and unimplemented calls go to `stderr`. GUI games inherit it too, so redirect it at launch: `game.exe 2> softgpu.log` in cmd, or `Start-Process game.exe -RedirectStandardError softgpu.log -Wait` in PowerShell. PowerShell's `2>` captures nothing from a GUI app.
 - **Registry install** changes a system-wide setting. Back up the original value first. GPU driver updates overwrite it.
 

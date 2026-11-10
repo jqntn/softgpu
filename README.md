@@ -11,3 +11,5 @@ build\harness
 ```
 
 `harness` loads the driver directly, clears the window to a color and checks the pixel. It prints `ok` on success.
+
+`wgltest` is an ordinary OpenGL app. It goes through `opengl32.dll`, so it needs the display adapter's `OpenGLDriverName` (x64) or `OpenGLDriverNameWow` (x86) to point at `softgpu.dll`. It fails unless the renderer is softgpu, then runs the same check.
