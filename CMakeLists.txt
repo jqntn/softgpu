@@ -11,5 +11,8 @@ target_compile_options(softgpu
 add_executable(harness src/harness.c)
 target_link_libraries(harness PRIVATE softgpu)
 
-set_target_properties(softgpu harness PROPERTIES C_STANDARD 11
+add_executable(wgltest src/wgltest.c)
+target_link_libraries(wgltest PRIVATE opengl32)
+
+set_target_properties(softgpu harness wgltest PROPERTIES C_STANDARD 11
                       C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
