@@ -6,6 +6,7 @@
 #include <stdlib.h>
 
 _Static_assert(sizeof(void*) == 8, "softgpu builds for x64 only");
+_Static_assert(kGlEntryCount == 336, "GL 1.1 has 336 dispatch entries");
 
 enum { kMaxContexts = 64, kPixelFormatCount = 1 };
 
@@ -67,7 +68,24 @@ static const GLubyte* APIENTRY GetString(GLenum name) {
   }
 }
 
-static INT_PTR APIENTRY Stub(void) { return 0; }
+static void Unimplemented(atomic_flag* reported, const char* name) {
+  if (!atomic_flag_test_and_set(reported)) {
+    fprintf(stderr, "softgpu: unimplemented gl%s\n", name);
+  }
+}
+
+#define SOFTGPU_STUB(ret, name, params, value)      \
+  static ret APIENTRY Stub##name params {           \
+    static atomic_flag reported = ATOMIC_FLAG_INIT; \
+    Unimplemented(&reported, #name);                \
+    return value;                                   \
+  }
+SOFTGPU_GL11(SOFTGPU_STUB)
+#undef SOFTGPU_STUB
+
+#define SOFTGPU_STUB_PROC(ret, name, params, value) (PROC) Stub##name,
+static const PROC kStubs[] = {SOFTGPU_GL11(SOFTGPU_STUB_PROC)};
+#undef SOFTGPU_STUB_PROC
 
 static ProcTable table = {
     .count = kGlEntryCount,
@@ -106,7 +124,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
   if (reason == DLL_PROCESS_ATTACH) {
     for (int i = 0; i < kGlEntryCount; i++) {
       if (!table.entries[i]) {
-        table.entries[i] = (PROC)Stub;
+        table.entries[i] = kStubs[i];
       }
     }
   }

@@ -5,6 +5,7 @@
 
 typedef void(APIENTRY* ClearColorFn)(GLclampf, GLclampf, GLclampf, GLclampf);
 typedef void(APIENTRY* ClearFn)(GLbitfield);
+typedef GLboolean(APIENTRY* IsEnabledFn)(GLenum);
 
 static const char* const kExports[] = {
     "DrvValidateVersion",
@@ -67,6 +68,9 @@ int main(void) {
 
   ((ClearColorFn)table->entries[kGlClearColor])(1.0f, 0.5f, 0.25f, 1.0f);
   ((ClearFn)table->entries[kGlClear])(GL_COLOR_BUFFER_BIT);
+  if (((IsEnabledFn)table->entries[kGlIsEnabled])(GL_DEPTH_TEST) != GL_FALSE) {
+    Fail("stub returned nonzero");
+  }
   if (!DrvSwapBuffers(hdc)) {
     Fail("swap failed");
   }

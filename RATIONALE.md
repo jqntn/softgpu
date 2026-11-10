@@ -31,7 +31,7 @@ softgpu is a software GPU for Windows: an OpenGL installable client driver (ICD)
 
 - **Loading.** `opengl32.dll` loads the DLL named by the `OpenGLDriverName` value under the display adapter's key, `HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\000X`. 32-bit apps use `OpenGLDriverNameWow`.
 - **Exports.** The 18 `Drv*` functions that `opengl32.dll` calls, from Mesa's `gldrv.h`.
-- **Dispatch.** `DrvSetContext` returns the GL 1.1 table of 336 entries. The order comes from `GLDISPATCHTABLE` in Mesa's `gldrv.h`. Unimplemented entries share one stub that returns 0, which is valid only under the x64 calling convention.
+- **Dispatch.** `DrvSetContext` returns the GL 1.1 table of 336 entries. The order, return types and parameters come from `GLDISPATCHTABLE` in Mesa's `gldrv.h`, as the `SOFTGPU_GL11` X-macro. Each unimplemented entry gets a typed stub that returns 0 and prints `unimplemented gl<Name>` to `stderr` on its first call, so a real app lists what to implement next.
 - **Handles.** `DHGLRC` is a 32-bit `ULONG`, so a context handle is its slot index plus one, not a pointer. 0 means failure.
 - **Pixel format.** One format: RGBA8, double-buffered, drawn to a window. No depth or stencil yet.
 - **Framebuffer.** It lives in the context and matches the window's client area at make-current and after each swap. It is a bottom-up 32-bit DIB, so rows are in GL order. `StretchDIBits` presents it.
@@ -61,7 +61,7 @@ softgpu is a software GPU for Windows: an OpenGL installable client driver (ICD)
 
 | Option | Trigger |
 |---|---|
-| 32-bit build | A 32-bit game. It needs a stub per signature and `OpenGLDriverNameWow`. |
+| 32-bit build | A 32-bit game. It needs a `.def` file for the undecorated `__stdcall` exports, an x86 CI job and `OpenGLDriverNameWow`. |
 | Framebuffer per window | An app draws into one window from two contexts, or swaps a DC that is not current. |
 | Visible error messages | The first GUI app through the registry. `stderr` is invisible there. |
 | Depth and stencil formats | Depth testing. |
