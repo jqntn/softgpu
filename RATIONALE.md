@@ -8,10 +8,17 @@ softgpu is a software GPU for Windows: an OpenGL installable client driver (ICD)
 - **Own implementation.** No Mesa or other OpenGL implementation. Khronos tools are allowed.
 - **Fail early and explicitly.** A bad API call returns the error value that WGL or OpenGL defines. Running out of memory stops the process with a message.
 - **Windows x64 only.** The ICD interface exists only on Windows. The build fails on other targets.
+- **Any Windows toolchain.** MSVC, clang and MinGW-w64 GCC. CI builds with all three.
 
 ## Code
 
-- **C11.** `_Thread_local` holds the current context and `_Static_assert` guards the target. CMake passes `/std:c11`.
+- **C11.** `_Thread_local` holds the current context and `_Static_assert` guards the target. CMake passes the compiler's C11 flag.
+
+## Build
+
+- **DLL name.** The ICD is `softgpu.dll` on every toolchain. MinGW would otherwise name it `libsoftgpu.dll`.
+- **System libraries.** Both targets link `gdi32` and `user32` explicitly. Only MSVC links them by default.
+- **Compile commands.** CMake exports `compile_commands.json`, so clang-tidy sees the same defines, standard and include paths as the compiler.
 - **Format.** clang-format uses Google style, left pointer alignment and braces on every control statement. `IncludeBlocks: Preserve` keeps `<windows.h>` before `<GL/gl.h>`. Files use LF line endings.
 - **Names.** clang-tidy enforces Google naming as errors, with the `SOFTGPU_` macro prefix.
 - **No comments in code.**
