@@ -8,12 +8,17 @@ softgpu is a software GPU for Windows: an OpenGL installable client driver (ICD)
 - **Own implementation.** No Mesa or other OpenGL implementation. Khronos tools are allowed.
 - **Standard C first.** Use standard C over the Win32 API when both do the job.
 - **Fail early and explicitly.** A bad API call returns the error value that WGL or OpenGL defines. Running out of memory stops the process with a message.
-- **Windows x64 only.** The ICD interface exists only on Windows. The build fails on other targets.
-- **Any Windows toolchain.** MSVC, clang and MinGW-w64 GCC. CI builds with all three.
+- **Windows only.** The ICD interface exists only on Windows. softgpu builds for x86 and x64, because 32-bit games load a 32-bit driver.
+- **Any Windows toolchain.** MSVC, clang and MinGW-w64 GCC. CI builds all three for x86 and x64 and runs the harness.
 
 ## Code
 
-- **C11.** `_Thread_local` holds the current context, `<stdatomic.h>` claims context slots and `_Static_assert` guards the target. CMake passes the compiler's C11 flag.
+- **C11.** `_Thread_local` holds the current context, `<stdatomic.h>` claims context slots and `_Static_assert` checks the size of the dispatch table. CMake passes the compiler's C11 flag.
+- **Format.** clang-format uses Google style, left pointer alignment and braces on every control statement. `<GL/gl.h>` needs `<windows.h>` first, so it sits below the `SOFTGPU_GL11` X-macro, where include sorting cannot move it. Files use LF line endings.
+- **Names.** clang-tidy enforces Google naming as errors, with the `SOFTGPU_` macro prefix.
+- **No comments in code.**
+- **Limits.** Use fixed-size arrays with explicit limits. Contexts live in a 64-slot array.
+- **Commits.** Make atomic commits with a Conventional Commits subject line only.
 
 ## Build
 
@@ -21,16 +26,12 @@ softgpu is a software GPU for Windows: an OpenGL installable client driver (ICD)
 - **C11 atomics on MSVC.** MSVC still marks them experimental, so CMake passes `/experimental:c11atomics` to MSVC only.
 - **System libraries.** CMake links `kernel32`, `user32` and `gdi32` by default on every Windows toolchain, so no target lists them.
 - **Compile commands.** CMake exports `compile_commands.json`, so clang-tidy sees the same defines, standard and include paths as the compiler.
-- **Format.** clang-format uses Google style, left pointer alignment and braces on every control statement. `<GL/gl.h>` needs `<windows.h>` first, so it sits below the `SOFTGPU_API` block, where include sorting cannot move it. Files use LF line endings.
-- **Names.** clang-tidy enforces Google naming as errors, with the `SOFTGPU_` macro prefix.
-- **No comments in code.**
-- **Limits.** Use fixed-size arrays with explicit limits. Contexts live in a 64-slot array.
-- **Commits.** Make atomic commits with a Conventional Commits subject line only.
+- **x86 GCC in CI.** The runner ships only 64-bit MinGW, so the x86 job installs `mingw-w64-i686-gcc` from the runner's MSYS2.
 
 ## ICD
 
-- **Loading.** `opengl32.dll` loads the DLL named by the `OpenGLDriverName` value under the display adapter's key, `HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\000X`. 32-bit apps use `OpenGLDriverNameWow`.
-- **Exports.** The 18 `Drv*` functions that `opengl32.dll` calls, from Mesa's `gldrv.h`.
+- **Loading.** `opengl32.dll` loads the DLL named by the `OpenGLDriverName` value under the display adapter's key, `HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\000X`. 32-bit apps use `OpenGLDriverNameWow`, which names the x86 build.
+- **Exports.** The 18 `Drv*` functions that `opengl32.dll` calls, from Mesa's `gldrv.h`. `icd.def` exports them by their plain names. On x86, `__stdcall` would otherwise decorate them as `_DrvCreateContext@4`, and `opengl32.dll` looks them up undecorated.
 - **Dispatch.** `DrvSetContext` returns the GL 1.1 table of 336 entries. The order, return types and parameters come from `GLDISPATCHTABLE` in Mesa's `gldrv.h`, as the `SOFTGPU_GL11` X-macro. Each unimplemented entry gets a typed stub that returns 0 and prints `unimplemented gl<Name>` to `stderr` on its first call, so a real app lists what to implement next.
 - **Handles.** `DHGLRC` is a 32-bit `ULONG`, so a context handle is its slot index plus one, not a pointer. 0 means failure.
 - **Pixel format.** One format: RGBA8, double-buffered, drawn to a window. No depth or stencil yet.
@@ -38,7 +39,7 @@ softgpu is a software GPU for Windows: an OpenGL installable client driver (ICD)
 
 ## Development
 
-- **harness** links the ICD directly and plays the part of `opengl32.dll`. It checks the exports, clears to a color, swaps and reads the pixel back. Nothing touches the registry.
+- **harness** links the ICD directly and plays the part of `opengl32.dll`. It checks the exports, clears to a color, swaps and reads the pixel back. Nothing touches the registry. CI runs it for every toolchain and architecture.
 - **Reports.** Errors and unimplemented calls go to `stderr`. GUI games inherit it too, so redirect it at launch: `game.exe 2> softgpu.log` in cmd, or `Start-Process game.exe -RedirectStandardError softgpu.log -Wait` in PowerShell. PowerShell's `2>` captures nothing from a GUI app.
 - **Registry install** changes a system-wide setting. Back up the original value first. GPU driver updates overwrite it.
 
@@ -62,7 +63,6 @@ softgpu is a software GPU for Windows: an OpenGL installable client driver (ICD)
 
 | Option | Trigger |
 |---|---|
-| 32-bit build | A 32-bit game. It needs a `.def` file for the undecorated `__stdcall` exports, an x86 CI job and `OpenGLDriverNameWow`. |
 | Framebuffer per window | An app draws into one window from two contexts, or swaps a DC that is not current. |
 | Log file | A game that only starts through a launcher, so nobody can redirect its `stderr`. |
 | Depth and stencil formats | Depth testing. |
