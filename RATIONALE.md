@@ -18,6 +18,7 @@ softgpu is a software OpenGL driver for Windows, in plain C. Its goal is to run 
 - **Include order.** `<GL/gl.h>` needs `<windows.h>` first. Put code between them, so include sorting cannot reorder them.
 - **No comments in code.**
 - **Limits.** Use fixed-size arrays with explicit limits.
+- **Layout.** One file, so the per-pixel path inlines without link-time optimization. Each function comes before its first caller: limits, types and state, helpers, the pixel pipeline from texture sampling to `Rasterize`, geometry from matrices to `EmitVertex`, then GL entry points in pipeline order (vertices, transform, capabilities, rasterization, textures, fragment operations, framebuffer, queries), the dispatch table, and the `Drv*` functions in the order `opengl32.dll` calls them.
 - **Commits.** Atomic, with a Conventional Commits subject line only.
 
 ## Build

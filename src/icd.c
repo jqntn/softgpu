@@ -224,115 +224,6 @@ static bool Compare(GLenum func, float value, float reference) {
   }
 }
 
-static float* CurrentMatrix(Context* context) {
-  return context->matrix_mode == GL_PROJECTION
-             ? context->projection[context->projection_top]
-             : context->modelview[context->modelview_top];
-}
-
-static void Transform(const float m[16], const float in[4], float out[4]) {
-  for (int r = 0; r < 4; r++) {
-    out[r] =
-        m[r] * in[0] + m[4 + r] * in[1] + m[8 + r] * in[2] + m[12 + r] * in[3];
-  }
-}
-
-static void MultMatrix(float m[16], const float n[16]) {
-  float product[16];
-  for (int c = 0; c < 4; c++) {
-    Transform(m, &n[c * 4], &product[c * 4]);
-  }
-  memcpy(m, product, sizeof(product));
-}
-
-static void APIENTRY ClearColor(GLclampf red, GLclampf green, GLclampf blue,
-                                GLclampf alpha) {
-  current->clear_color = PackColor((float[4]){red, green, blue, alpha});
-}
-
-static void WriteStencil(const Context* context, uint8_t* stencil,
-                         GLuint value) {
-  *stencil = (uint8_t)((*stencil & ~context->stencil_writemask) |
-                       (value & context->stencil_writemask));
-}
-
-static void APIENTRY ClearStencil(GLint s) {
-  current->clear_stencil = (GLuint)s & kStencilMax;
-}
-
-static void APIENTRY Clear(GLbitfield mask) {
-  Context* context = current;
-  int x0 = 0;
-  int y0 = 0;
-  int x1 = context->width;
-  int y1 = context->height;
-  if (context->scissor_test) {
-    x0 = MaxInt(x0, context->scissor[0]);
-    y0 = MaxInt(y0, context->scissor[1]);
-    x1 = MinInt(x1, context->scissor[0] + context->scissor[2]);
-    y1 = MinInt(y1, context->scissor[1] + context->scissor[3]);
-  }
-  bool depth = (mask & GL_DEPTH_BUFFER_BIT) && context->depth_mask;
-  bool stencil = mask & GL_STENCIL_BUFFER_BIT;
-  for (int y = y0; y < y1; y++) {
-    size_t row = (size_t)y * (size_t)context->width;
-    for (int x = x0; x < x1; x++) {
-      if (mask & GL_COLOR_BUFFER_BIT) {
-        context->pixels[row + x] = context->clear_color;
-      }
-      if (depth) {
-        context->depth[row + x] = 1.0f;
-      }
-      if (stencil) {
-        WriteStencil(context, &context->stencil[row + x],
-                     context->clear_stencil);
-      }
-    }
-  }
-}
-
-static const GLubyte* APIENTRY GetString(GLenum name) {
-  switch (name) {
-    case GL_VENDOR:
-    case GL_RENDERER:
-      return (const GLubyte*)"softgpu";
-    case GL_VERSION:
-      return (const GLubyte*)"1.1";
-    case GL_EXTENSIONS:
-      return (const GLubyte*)"";
-    default:
-      return NULL;
-  }
-}
-
-static void APIENTRY GetIntegerv(GLenum pname, GLint* params) {
-  static atomic_flag reported = ATOMIC_FLAG_INIT;
-  switch (pname) {
-    case GL_MAX_TEXTURE_SIZE:
-      *params = kMaxTextureSize;
-      break;
-    case GL_RED_BITS:
-    case GL_GREEN_BITS:
-    case GL_BLUE_BITS:
-    case GL_ALPHA_BITS:
-      *params = kChannelBits;
-      break;
-    case GL_DEPTH_BITS:
-      *params = kDepthBits;
-      break;
-    case GL_STENCIL_BITS:
-      *params = kStencilBits;
-      break;
-    default:
-      Unimplemented(&reported, "GetIntegerv with this parameter");
-  }
-}
-
-static float ToWindow(float ndc, int origin, int size) {
-  float window = (ndc + 1.0f) * 0.5f * (float)size + (float)origin;
-  return MaxFloat(MinFloat(window, (float)kGuardBand), -(float)kGuardBand);
-}
-
 static int CompleteLevels(const Texture* texture) {
   const Level* base = texture->levels;
   if (!base->texels) {
@@ -518,6 +409,12 @@ static void Blend(const Context* context, uint32_t pixel, float color[4]) {
   }
 }
 
+static void WriteStencil(const Context* context, uint8_t* stencil,
+                         GLuint value) {
+  *stencil = (uint8_t)((*stencil & ~context->stencil_writemask) |
+                       (value & context->stencil_writemask));
+}
+
 static void ApplyStencilOp(const Context* context, GLenum op,
                            uint8_t* stencil) {
   int value = *stencil;
@@ -605,6 +502,11 @@ static void Shade(Context* context, const Setup* setup, size_t index,
     Blend(context, context->pixels[index], color);
   }
   context->pixels[index] = PackColor(color);
+}
+
+static float ToWindow(float ndc, int origin, int size) {
+  float window = (ndc + 1.0f) * 0.5f * (float)size + (float)origin;
+  return MaxFloat(MinFloat(window, (float)kGuardBand), -(float)kGuardBand);
 }
 
 static void Rasterize(Context* context, const Vertex* const input[3]) {
@@ -758,6 +660,27 @@ static void Rasterize(Context* context, const Vertex* const input[3]) {
   }
 }
 
+static float* CurrentMatrix(Context* context) {
+  return context->matrix_mode == GL_PROJECTION
+             ? context->projection[context->projection_top]
+             : context->modelview[context->modelview_top];
+}
+
+static void Transform(const float m[16], const float in[4], float out[4]) {
+  for (int r = 0; r < 4; r++) {
+    out[r] =
+        m[r] * in[0] + m[4 + r] * in[1] + m[8 + r] * in[2] + m[12 + r] * in[3];
+  }
+}
+
+static void MultMatrix(float m[16], const float n[16]) {
+  float product[16];
+  for (int c = 0; c < 4; c++) {
+    Transform(m, &n[c * 4], &product[c * 4]);
+  }
+  memcpy(m, product, sizeof(product));
+}
+
 static float PlaneDistance(const Vertex* vertex, int plane) {
   float w = vertex->position[3];
   float p = vertex->position[plane / 2];
@@ -886,27 +809,60 @@ static void EmitVertex(GLfloat x, GLfloat y, GLfloat z) {
   Assemble(context, &vertex);
 }
 
-static void APIENTRY Viewport(GLint x, GLint y, GLsizei width, GLsizei height) {
-  if (width >= 0 && height >= 0) {
-    current->viewport[0] = x;
-    current->viewport[1] = y;
-    current->viewport[2] = width;
-    current->viewport[3] = height;
+static void APIENTRY Begin(GLenum mode) {
+  static atomic_flag reported = ATOMIC_FLAG_INIT;
+  if (mode <= GL_LINE_STRIP) {
+    Unimplemented(&reported, "Begin with points or lines");
   }
+  current->mode = mode;
+  current->drawing = true;
+  current->vertex_count = 0;
 }
 
-static void APIENTRY Scissor(GLint x, GLint y, GLsizei width, GLsizei height) {
-  if (width >= 0 && height >= 0) {
-    current->scissor[0] = x;
-    current->scissor[1] = y;
-    current->scissor[2] = width;
-    current->scissor[3] = height;
-  }
+static void APIENTRY End(void) { current->drawing = false; }
+
+static void SetColor(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) {
+  current->color[0] = red;
+  current->color[1] = green;
+  current->color[2] = blue;
+  current->color[3] = alpha;
 }
 
-static void APIENTRY DepthRange(GLclampd z_near, GLclampd z_far) {
-  current->depth_range[0] = Clamp01((float)z_near);
-  current->depth_range[1] = Clamp01((float)z_far);
+static void APIENTRY Color3f(GLfloat red, GLfloat green, GLfloat blue) {
+  SetColor(red, green, blue, 1.0f);
+}
+
+static void APIENTRY Color3fv(const GLfloat* v) {
+  SetColor(v[0], v[1], v[2], 1.0f);
+}
+
+static void APIENTRY Color4f(GLfloat red, GLfloat green, GLfloat blue,
+                             GLfloat alpha) {
+  SetColor(red, green, blue, alpha);
+}
+
+static void APIENTRY Color4fv(const GLfloat* v) {
+  SetColor(v[0], v[1], v[2], v[3]);
+}
+
+static void APIENTRY Color4ubv(const GLubyte* v) {
+  SetColor((float)v[0] / 255.0f, (float)v[1] / 255.0f, (float)v[2] / 255.0f,
+           (float)v[3] / 255.0f);
+}
+
+static void APIENTRY TexCoord2f(GLfloat s, GLfloat t) {
+  current->texcoord[0] = s;
+  current->texcoord[1] = t;
+}
+
+static void APIENTRY Vertex2f(GLfloat x, GLfloat y) { EmitVertex(x, y, 0.0f); }
+
+static void APIENTRY Vertex3f(GLfloat x, GLfloat y, GLfloat z) {
+  EmitVertex(x, y, z);
+}
+
+static void APIENTRY Vertex3fv(const GLfloat* v) {
+  EmitVertex(v[0], v[1], v[2]);
 }
 
 static void APIENTRY MatrixMode(GLenum mode) {
@@ -1005,60 +961,18 @@ static void APIENTRY Frustum(GLdouble left, GLdouble right, GLdouble bottom,
                                (float)(-2 * z_far * z_near / depth), 0});
 }
 
-static void APIENTRY Begin(GLenum mode) {
-  static atomic_flag reported = ATOMIC_FLAG_INIT;
-  if (mode <= GL_LINE_STRIP) {
-    Unimplemented(&reported, "Begin with points or lines");
+static void APIENTRY Viewport(GLint x, GLint y, GLsizei width, GLsizei height) {
+  if (width >= 0 && height >= 0) {
+    current->viewport[0] = x;
+    current->viewport[1] = y;
+    current->viewport[2] = width;
+    current->viewport[3] = height;
   }
-  current->mode = mode;
-  current->drawing = true;
-  current->vertex_count = 0;
 }
 
-static void APIENTRY End(void) { current->drawing = false; }
-
-static void SetColor(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) {
-  current->color[0] = red;
-  current->color[1] = green;
-  current->color[2] = blue;
-  current->color[3] = alpha;
-}
-
-static void APIENTRY Color3f(GLfloat red, GLfloat green, GLfloat blue) {
-  SetColor(red, green, blue, 1.0f);
-}
-
-static void APIENTRY Color3fv(const GLfloat* v) {
-  SetColor(v[0], v[1], v[2], 1.0f);
-}
-
-static void APIENTRY Color4f(GLfloat red, GLfloat green, GLfloat blue,
-                             GLfloat alpha) {
-  SetColor(red, green, blue, alpha);
-}
-
-static void APIENTRY Color4fv(const GLfloat* v) {
-  SetColor(v[0], v[1], v[2], v[3]);
-}
-
-static void APIENTRY Color4ubv(const GLubyte* v) {
-  SetColor((float)v[0] / 255.0f, (float)v[1] / 255.0f, (float)v[2] / 255.0f,
-           (float)v[3] / 255.0f);
-}
-
-static void APIENTRY TexCoord2f(GLfloat s, GLfloat t) {
-  current->texcoord[0] = s;
-  current->texcoord[1] = t;
-}
-
-static void APIENTRY Vertex2f(GLfloat x, GLfloat y) { EmitVertex(x, y, 0.0f); }
-
-static void APIENTRY Vertex3f(GLfloat x, GLfloat y, GLfloat z) {
-  EmitVertex(x, y, z);
-}
-
-static void APIENTRY Vertex3fv(const GLfloat* v) {
-  EmitVertex(v[0], v[1], v[2]);
+static void APIENTRY DepthRange(GLclampd z_near, GLclampd z_far) {
+  current->depth_range[0] = Clamp01((float)z_near);
+  current->depth_range[1] = Clamp01((float)z_far);
 }
 
 static void SetCapability(GLenum cap, bool value) {
@@ -1132,131 +1046,6 @@ static void APIENTRY PolygonOffset(GLfloat factor, GLfloat units) {
 }
 
 static void APIENTRY Hint(GLenum target, GLenum mode) {}
-
-static void APIENTRY DepthFunc(GLenum func) {
-  if (func >= GL_NEVER && func <= GL_ALWAYS) {
-    current->depth_func = func;
-  }
-}
-
-static void APIENTRY DepthMask(GLboolean flag) {
-  current->depth_mask = flag != GL_FALSE;
-}
-
-static void APIENTRY StencilFunc(GLenum func, GLint ref, GLuint mask) {
-  if (func >= GL_NEVER && func <= GL_ALWAYS) {
-    current->stencil_func = func;
-    current->stencil_ref = ClampInt(ref, 0, kStencilMax);
-    current->stencil_value_mask = mask;
-  }
-}
-
-static bool IsStencilOp(GLenum op) {
-  switch (op) {
-    case GL_KEEP:
-    case GL_ZERO:
-    case GL_REPLACE:
-    case GL_INCR:
-    case GL_DECR:
-    case GL_INVERT:
-      return true;
-    default:
-      return false;
-  }
-}
-
-static void APIENTRY StencilOp(GLenum fail, GLenum zfail, GLenum zpass) {
-  if (IsStencilOp(fail) && IsStencilOp(zfail) && IsStencilOp(zpass)) {
-    current->stencil_fail = fail;
-    current->stencil_zfail = zfail;
-    current->stencil_zpass = zpass;
-  }
-}
-
-static void APIENTRY StencilMask(GLuint mask) {
-  current->stencil_writemask = mask;
-}
-
-static void APIENTRY AlphaFunc(GLenum func, GLclampf ref) {
-  if (func >= GL_NEVER && func <= GL_ALWAYS) {
-    current->alpha_func = func;
-    current->alpha_ref = Clamp01(ref);
-  }
-}
-
-static bool IsBlendFactor(GLenum factor) {
-  switch (factor) {
-    case GL_ZERO:
-    case GL_ONE:
-    case GL_SRC_COLOR:
-    case GL_ONE_MINUS_SRC_COLOR:
-    case GL_DST_COLOR:
-    case GL_ONE_MINUS_DST_COLOR:
-    case GL_SRC_ALPHA:
-    case GL_ONE_MINUS_SRC_ALPHA:
-    case GL_DST_ALPHA:
-    case GL_ONE_MINUS_DST_ALPHA:
-    case GL_SRC_ALPHA_SATURATE:
-      return true;
-    default:
-      return false;
-  }
-}
-
-static void APIENTRY BlendFunc(GLenum sfactor, GLenum dfactor) {
-  if (IsBlendFactor(sfactor) && IsBlendFactor(dfactor)) {
-    current->blend_src = sfactor;
-    current->blend_dst = dfactor;
-  }
-}
-
-static void SetFog(GLenum pname, const GLfloat* params) {
-  static atomic_flag reported = ATOMIC_FLAG_INIT;
-  Context* context = current;
-  switch (pname) {
-    case GL_FOG_MODE: {
-      GLenum mode = (GLenum)params[0];
-      if (mode == GL_LINEAR || mode == GL_EXP || mode == GL_EXP2) {
-        context->fog_mode = mode;
-      }
-      break;
-    }
-    case GL_FOG_DENSITY:
-      if (params[0] >= 0.0f) {
-        context->fog_density = params[0];
-      }
-      break;
-    case GL_FOG_START:
-      context->fog_start = params[0];
-      break;
-    case GL_FOG_END:
-      context->fog_end = params[0];
-      break;
-    case GL_FOG_COLOR:
-      for (int i = 0; i < 4; i++) {
-        context->fog_color[i] = Clamp01(params[i]);
-      }
-      break;
-    default:
-      Unimplemented(&reported, "Fog with GL_FOG_INDEX");
-  }
-}
-
-static void APIENTRY Fogf(GLenum pname, GLfloat param) {
-  if (pname != GL_FOG_COLOR) {
-    SetFog(pname, &param);
-  }
-}
-
-static void APIENTRY Fogi(GLenum pname, GLint param) {
-  if (pname != GL_FOG_COLOR) {
-    SetFog(pname, (GLfloat[1]){(GLfloat)param});
-  }
-}
-
-static void APIENTRY Fogfv(GLenum pname, const GLfloat* params) {
-  SetFog(pname, params);
-}
 
 static void APIENTRY PixelStorei(GLenum pname, GLint param) {
   static atomic_flag reported = ATOMIC_FLAG_INIT;
@@ -1591,6 +1380,180 @@ static void APIENTRY CopyTexSubImage2D(GLenum target, GLint level,
   }
 }
 
+static void SetFog(GLenum pname, const GLfloat* params) {
+  static atomic_flag reported = ATOMIC_FLAG_INIT;
+  Context* context = current;
+  switch (pname) {
+    case GL_FOG_MODE: {
+      GLenum mode = (GLenum)params[0];
+      if (mode == GL_LINEAR || mode == GL_EXP || mode == GL_EXP2) {
+        context->fog_mode = mode;
+      }
+      break;
+    }
+    case GL_FOG_DENSITY:
+      if (params[0] >= 0.0f) {
+        context->fog_density = params[0];
+      }
+      break;
+    case GL_FOG_START:
+      context->fog_start = params[0];
+      break;
+    case GL_FOG_END:
+      context->fog_end = params[0];
+      break;
+    case GL_FOG_COLOR:
+      for (int i = 0; i < 4; i++) {
+        context->fog_color[i] = Clamp01(params[i]);
+      }
+      break;
+    default:
+      Unimplemented(&reported, "Fog with GL_FOG_INDEX");
+  }
+}
+
+static void APIENTRY Fogf(GLenum pname, GLfloat param) {
+  if (pname != GL_FOG_COLOR) {
+    SetFog(pname, &param);
+  }
+}
+
+static void APIENTRY Fogi(GLenum pname, GLint param) {
+  if (pname != GL_FOG_COLOR) {
+    SetFog(pname, (GLfloat[1]){(GLfloat)param});
+  }
+}
+
+static void APIENTRY Fogfv(GLenum pname, const GLfloat* params) {
+  SetFog(pname, params);
+}
+
+static void APIENTRY Scissor(GLint x, GLint y, GLsizei width, GLsizei height) {
+  if (width >= 0 && height >= 0) {
+    current->scissor[0] = x;
+    current->scissor[1] = y;
+    current->scissor[2] = width;
+    current->scissor[3] = height;
+  }
+}
+
+static void APIENTRY AlphaFunc(GLenum func, GLclampf ref) {
+  if (func >= GL_NEVER && func <= GL_ALWAYS) {
+    current->alpha_func = func;
+    current->alpha_ref = Clamp01(ref);
+  }
+}
+
+static void APIENTRY StencilFunc(GLenum func, GLint ref, GLuint mask) {
+  if (func >= GL_NEVER && func <= GL_ALWAYS) {
+    current->stencil_func = func;
+    current->stencil_ref = ClampInt(ref, 0, kStencilMax);
+    current->stencil_value_mask = mask;
+  }
+}
+
+static bool IsStencilOp(GLenum op) {
+  switch (op) {
+    case GL_KEEP:
+    case GL_ZERO:
+    case GL_REPLACE:
+    case GL_INCR:
+    case GL_DECR:
+    case GL_INVERT:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static void APIENTRY StencilOp(GLenum fail, GLenum zfail, GLenum zpass) {
+  if (IsStencilOp(fail) && IsStencilOp(zfail) && IsStencilOp(zpass)) {
+    current->stencil_fail = fail;
+    current->stencil_zfail = zfail;
+    current->stencil_zpass = zpass;
+  }
+}
+
+static void APIENTRY StencilMask(GLuint mask) {
+  current->stencil_writemask = mask;
+}
+
+static void APIENTRY DepthFunc(GLenum func) {
+  if (func >= GL_NEVER && func <= GL_ALWAYS) {
+    current->depth_func = func;
+  }
+}
+
+static void APIENTRY DepthMask(GLboolean flag) {
+  current->depth_mask = flag != GL_FALSE;
+}
+
+static bool IsBlendFactor(GLenum factor) {
+  switch (factor) {
+    case GL_ZERO:
+    case GL_ONE:
+    case GL_SRC_COLOR:
+    case GL_ONE_MINUS_SRC_COLOR:
+    case GL_DST_COLOR:
+    case GL_ONE_MINUS_DST_COLOR:
+    case GL_SRC_ALPHA:
+    case GL_ONE_MINUS_SRC_ALPHA:
+    case GL_DST_ALPHA:
+    case GL_ONE_MINUS_DST_ALPHA:
+    case GL_SRC_ALPHA_SATURATE:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static void APIENTRY BlendFunc(GLenum sfactor, GLenum dfactor) {
+  if (IsBlendFactor(sfactor) && IsBlendFactor(dfactor)) {
+    current->blend_src = sfactor;
+    current->blend_dst = dfactor;
+  }
+}
+
+static void APIENTRY ClearColor(GLclampf red, GLclampf green, GLclampf blue,
+                                GLclampf alpha) {
+  current->clear_color = PackColor((float[4]){red, green, blue, alpha});
+}
+
+static void APIENTRY ClearStencil(GLint s) {
+  current->clear_stencil = (GLuint)s & kStencilMax;
+}
+
+static void APIENTRY Clear(GLbitfield mask) {
+  Context* context = current;
+  int x0 = 0;
+  int y0 = 0;
+  int x1 = context->width;
+  int y1 = context->height;
+  if (context->scissor_test) {
+    x0 = MaxInt(x0, context->scissor[0]);
+    y0 = MaxInt(y0, context->scissor[1]);
+    x1 = MinInt(x1, context->scissor[0] + context->scissor[2]);
+    y1 = MinInt(y1, context->scissor[1] + context->scissor[3]);
+  }
+  bool depth = (mask & GL_DEPTH_BUFFER_BIT) && context->depth_mask;
+  bool stencil = mask & GL_STENCIL_BUFFER_BIT;
+  for (int y = y0; y < y1; y++) {
+    size_t row = (size_t)y * (size_t)context->width;
+    for (int x = x0; x < x1; x++) {
+      if (mask & GL_COLOR_BUFFER_BIT) {
+        context->pixels[row + x] = context->clear_color;
+      }
+      if (depth) {
+        context->depth[row + x] = 1.0f;
+      }
+      if (stencil) {
+        WriteStencil(context, &context->stencil[row + x],
+                     context->clear_stencil);
+      }
+    }
+  }
+}
+
 static void APIENTRY ReadPixels(GLint x, GLint y, GLsizei width, GLsizei height,
                                 GLenum format, GLenum type, GLvoid* pixels) {
   static atomic_flag reported = ATOMIC_FLAG_INIT;
@@ -1622,6 +1585,43 @@ static void APIENTRY ReadPixels(GLint x, GLint y, GLsizei width, GLsizei height,
 static void APIENTRY Finish(void) {}
 
 static void APIENTRY Flush(void) {}
+
+static const GLubyte* APIENTRY GetString(GLenum name) {
+  switch (name) {
+    case GL_VENDOR:
+    case GL_RENDERER:
+      return (const GLubyte*)"softgpu";
+    case GL_VERSION:
+      return (const GLubyte*)"1.1";
+    case GL_EXTENSIONS:
+      return (const GLubyte*)"";
+    default:
+      return NULL;
+  }
+}
+
+static void APIENTRY GetIntegerv(GLenum pname, GLint* params) {
+  static atomic_flag reported = ATOMIC_FLAG_INIT;
+  switch (pname) {
+    case GL_MAX_TEXTURE_SIZE:
+      *params = kMaxTextureSize;
+      break;
+    case GL_RED_BITS:
+    case GL_GREEN_BITS:
+    case GL_BLUE_BITS:
+    case GL_ALPHA_BITS:
+      *params = kChannelBits;
+      break;
+    case GL_DEPTH_BITS:
+      *params = kDepthBits;
+      break;
+    case GL_STENCIL_BITS:
+      *params = kStencilBits;
+      break;
+    default:
+      Unimplemented(&reported, "GetIntegerv with this parameter");
+  }
+}
 
 #define SOFTGPU_STUB(ret, name, params, value)      \
   static ret APIENTRY Stub##name params {           \
