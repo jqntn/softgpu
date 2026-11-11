@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <windows.h>
 
 static const PIXELFORMATDESCRIPTOR kFormat = {
@@ -64,18 +63,20 @@ int main(void) {
     Fail("no WGL_EXT_swap_control");
   }
   DEVMODEA mode = {.dmSize = sizeof(mode)};
-  struct timespec start;
-  struct timespec end;
-  if (!EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &mode) ||
-      !timespec_get(&start, TIME_UTC)) {
-    Fail("no clock");
+  LARGE_INTEGER frequency;
+  LARGE_INTEGER start;
+  LARGE_INTEGER end;
+  if (!EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &mode)) {
+    Fail("no display mode");
   }
+  QueryPerformanceFrequency(&frequency);
+  QueryPerformanceCounter(&start);
   for (int i = 0; i < kSwaps; i++) {
     SwapBuffers(hdc);
   }
-  timespec_get(&end, TIME_UTC);
-  double seconds = (double)(end.tv_sec - start.tv_sec) +
-                   (double)(end.tv_nsec - start.tv_nsec) * 1e-9;
+  QueryPerformanceCounter(&end);
+  double seconds =
+      (double)(end.QuadPart - start.QuadPart) / (double)frequency.QuadPart;
   double expected = (double)kSwaps / (double)mode.dmDisplayFrequency;
   if (seconds < 0.8 * expected) {
     fprintf(stderr, "%d swaps took %.3f s, expected %.3f s\n", kSwaps, seconds,

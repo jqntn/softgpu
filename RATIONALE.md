@@ -8,7 +8,7 @@ softgpu is a software OpenGL driver for Windows, in plain C. Its goal is to run 
 - **Readable.** The driver stays easy to read. Speed comes from structure, like threads and tiles, before low-level tricks.
 - **Own implementation.** No Mesa or other OpenGL implementation. Khronos tools are allowed.
 - **Self-contained.** The driver may depend only on small official tools, like Khronos' glslang, and needs none today. Dependencies are hashed archives fetched by CMake.
-- **Standard C first.** Use standard C over the Win32 API when both do the job.
+- **Standard C first.** Use standard C over the Win32 API when both do the job. 32-bit MinGW's runtime lacks C11's `timespec_get`, so timing uses `QueryPerformanceCounter`.
 - **Fail early and explicitly.** A bad API call returns the error value that WGL or OpenGL defines. Running out of memory stops the process.
 - **Windows, x86 and x64, any toolchain.** 32-bit games load a 32-bit driver. MSVC, clang and MinGW-w64 GCC must all build it.
 
