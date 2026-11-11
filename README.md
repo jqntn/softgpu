@@ -1,6 +1,6 @@
 # softgpu
 
-A software GPU for Windows: an OpenGL driver in plain C that renders on the CPU.
+A software GPU for Windows: an OpenGL 1.1 driver in plain C that renders on the CPU.
 
 ![The triangle sample rendered by softgpu](samples/triangle.png)
 
@@ -31,3 +31,9 @@ scripts\uninstall.ps1
 ```
 
 softgpu then drives every OpenGL app until uninstalled or until a GPU driver update. Both scripts restart the display drivers, so the screen goes black for a few seconds and GPU apps may lose their state.
+
+## Supported games
+
+- Quake, through [QuakeSpasm](https://quakespasm.sourceforge.net/) 0.97.0, 32-bit and 64-bit.
+
+![Quake rendered by softgpu](docs/quake.png)
