@@ -5,8 +5,9 @@ softgpu is a software OpenGL driver for Windows, in plain C. Its goal is to run 
 ## Principles
 
 - **Ultra simple.** Write the smallest code that does the job. Prefer deletion to addition.
+- **Readable.** The driver stays easy to read. Speed comes from structure, like threads and tiles, before low-level tricks.
 - **Own implementation.** No Mesa or other OpenGL implementation. Khronos tools are allowed.
-- **Self-contained.** The driver has no dependencies. Sample dependencies are hashed archives fetched by CMake.
+- **Self-contained.** The driver may depend only on small official tools, like Khronos' glslang, and needs none today. Dependencies are hashed archives fetched by CMake.
 - **Standard C first.** Use standard C over the Win32 API when both do the job.
 - **Fail early and explicitly.** A bad API call returns the error value that WGL or OpenGL defines. Running out of memory stops the process.
 - **Windows, x86 and x64, any toolchain.** 32-bit games load a 32-bit driver. MSVC, clang and MinGW-w64 GCC must all build it.
@@ -48,12 +49,12 @@ softgpu is a software OpenGL driver for Windows, in plain C. Its goal is to run 
 - **wgltest** and the samples need softgpu installed, so CI only builds them.
 - **Reports.** GUI games inherit `stderr`, so redirect it at launch: `game.exe 2> softgpu.log` in cmd, or `Start-Process game.exe -RedirectStandardError softgpu.log -Wait` in PowerShell. PowerShell's `2>` captures nothing from a GUI app.
 - **Install.** The scripts keep the original driver names as `Softgpu<Name>` values beside them and keep each value's registry type. A second install keeps the first backup. Uninstall leaves a name alone when a driver update already replaced softgpu. `restart.ps1` restarts the display devices, because of the cached name. The scripts must run in Windows PowerShell 5.1 and PowerShell 7.
+- **Benchmarks.** Time Release builds in a focused window. QuakeSpasm sleeps 16 ms per frame without input focus.
 
 ## Direction
 
-- **First milestone.** GL 1.x fixed-function games (Quake 3 era), driven by apitrace captures replayed as regression tests.
-- **Shaders.** GLSL through glslang to SPIR-V, then softgpu's own IR, interpreted first and JIT-compiled later. Fixed function becomes generated shaders.
-- **Speed.** AVX2 over pixel groups, and screen tiles across threads.
+- **Scope.** OpenGL 1.1 fixed-function games, the version softgpu reports, driven by apitrace captures replayed as regression tests. The rest of GL 1.1 comes in the order real games report it on `stderr`.
+- **Speed.** Plain C, in this order: no C runtime calls per pixel, screen tiles across threads, block coverage tests in the rasterizer, then pixel loops over small blocks that compilers vectorize. A profile picks each step, and none may cost readability.
 
 ## Rejected
 
@@ -63,7 +64,9 @@ softgpu is a software OpenGL driver for Windows, in plain C. Its goal is to run 
 | Vulkan ICD | Cleaner per feature, but far more work before the first game runs. |
 | Mesa | The goal is an own implementation. |
 | WDDM driver | A kernel driver and signing, only to appear as a separate adapter. |
-| C++ | SIMD intrinsics are a C API. |
+| C++ | C keeps the driver small and readable. SIMD intrinsics are a C API too. |
+| AVX2 | CPUs without it need a runtime check and a second code path kept identical. Threads give more for that cost. |
+| LLVM | A large C++ dependency, for code generation that GL 1.1 does not need. |
 
 ## Deferred
 
@@ -71,4 +74,6 @@ softgpu is a software OpenGL driver for Windows, in plain C. Its goal is to run 
 |---|---|
 | Framebuffer per window | An app draws into one window from two contexts, or swaps a DC that is not current. |
 | Log file | A game that only starts through a launcher, so nobody can redirect its `stderr`. |
-| SIMD and 32-bit edge stepping | A profile shows the rasterizer. Step in 32-bit inside tiles after 64-bit setup. |
+| Hand-written SSE2 | After the plain-C speed steps, a profile still shows per-pixel math that the compiler did not vectorize. |
+| 32-bit edge stepping | A profile shows edge stepping, a small share of the time today. Step in 32-bit inside tiles after 64-bit setup. |
+| GL 2.0 and shaders | A game that needs GL 2.0. GLSL then goes through glslang and the SPIRV-Tools optimizer to SPIR-V, decoded once and interpreted over pixel blocks, with no IR of softgpu's own. Fixed function moves onto shaders only once they run faster. |
