@@ -49,6 +49,7 @@ static const GLfloat kLowerLeftCw[] = {-1.0f, -1.0f, -1.0f, 1.0f, 1.0f, -1.0f};
 static const GLfloat kUpperRightCw[] = {-1.0f, 1.0f, 1.0f, 1.0f, 1.0f, -1.0f};
 static const GLfloat kUpperRightCcw[] = {-1.0f, 1.0f, 1.0f, -1.0f, 1.0f, 1.0f};
 static const GLfloat kCenterCcw[] = {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f};
+static const GLfloat kSliver[] = {-0.9f, -1.9f, 1.1f, -1.9f, -0.9f, 2.1f};
 static const GLubyte kTexels[] = {255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0};
 
 static void Fail(const char* message) {
@@ -161,6 +162,25 @@ static void TestPipeline(const ProcTable* table, int width, int height) {
   ((EnumFn)table->entries[kGlDisable])(GL_STENCIL_TEST);
   ExpectColor(table, left, height / 2, RGB(255, 0, 0));
   ExpectColor(table, right, height / 2, RGB(0, 255, 0));
+
+  ((ClearFn)table->entries[kGlClear])(GL_DEPTH_BUFFER_BIT);
+  ((EnumFn)table->entries[kGlEnable])(GL_DEPTH_TEST);
+  ((Color4fFn)table->entries[kGlColor4f])(0.0f, 1.0f, 0.0f, 1.0f);
+  Quad(table, -1.0f, -1.0f, 1.0f, 1.0f, 0.998f);
+  ((Color4fFn)table->entries[kGlColor4f])(1.0f, 0.0f, 0.0f, 1.0f);
+  ((EnumFn)table->entries[kGlBegin])(GL_TRIANGLES);
+  for (int i = 0; i < 6; i += 2) {
+    ((Vertex3fFn)table->entries[kGlVertex3f])(
+        (2.0f * (float)(width / 2) + 1.0f + 2.0f * kSliver[i]) / (float)width -
+            1.0f,
+        (2.0f * (float)(height / 2) + 1.0f + 2.0f * kSliver[i + 1]) /
+                (float)height -
+            1.0f,
+        0.9984f);
+  }
+  ((EndFn)table->entries[kGlEnd])();
+  ((EnumFn)table->entries[kGlDisable])(GL_DEPTH_TEST);
+  ExpectColor(table, width / 2, height / 2, RGB(0, 255, 0));
 
   ((EnumFn)table->entries[kGlMatrixMode])(GL_PROJECTION);
   ((FrustumFn)table->entries[kGlFrustum])(-1.0, 1.0, -1.0, 1.0, 1.0, 10.0);

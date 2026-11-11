@@ -666,6 +666,7 @@ static void Rasterize(Context* context, const Vertex* const input[3]) {
   int64_t px = (int64_t)min_x * kSubpixels + kSubpixels / 2;
   int64_t py = (int64_t)min_y * kSubpixels + kSubpixels / 2;
   int64_t row[3];
+  int64_t bias[3];
   int64_t step_x[3];
   int64_t step_y[3];
   for (int k = 0; k < 3; k++) {
@@ -673,8 +674,8 @@ static void Rasterize(Context* context, const Vertex* const input[3]) {
     int q = (k + 2) % 3;
     int64_t dx = x[q] - x[p];
     int64_t dy = y[q] - y[p];
-    bool top_left = dy < 0 || (dy == 0 && dx < 0);
-    row[k] = dx * (py - y[p]) - dy * (px - x[p]) - (top_left ? 0 : 1);
+    bias[k] = dy < 0 || (dy == 0 && dx < 0) ? 0 : 1;
+    row[k] = dx * (py - y[p]) - dy * (px - x[p]) - bias[k];
     step_x[k] = -dy * kSubpixels;
     step_y[k] = dx * kSubpixels;
   }
@@ -718,9 +719,9 @@ static void Rasterize(Context* context, const Vertex* const input[3]) {
     size_t line = (size_t)pixel_y * (size_t)context->width;
     for (int pixel_x = min_x; pixel_x <= max_x; pixel_x++) {
       if ((e[0] | e[1] | e[2]) >= 0) {
-        float weight[3] = {(float)e[0] * inverse_area,
-                           (float)e[1] * inverse_area,
-                           (float)e[2] * inverse_area};
+        float weight[3] = {(float)(e[0] + bias[0]) * inverse_area,
+                           (float)(e[1] + bias[1]) * inverse_area,
+                           (float)(e[2] + bias[2]) * inverse_area};
         Shade(context, &setup, line + (size_t)pixel_x, weight);
       }
       for (int k = 0; k < 3; k++) {
