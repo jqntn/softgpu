@@ -30,12 +30,12 @@ softgpu is a software OpenGL driver for Windows, in plain C. Its goal is to run 
 - **Exports.** `icd.def` exports the `Drv*` functions by plain name, because x86 `__stdcall` decorates them and `opengl32.dll` looks them up undecorated.
 - **Dispatch.** The 336 GL 1.1 entries follow `GLDISPATCHTABLE` in Mesa's `gldrv.h`. Each unimplemented entry is a typed stub that returns 0 and reports itself on `stderr` once, so a real app lists what to implement next.
 - **Handles.** `DHGLRC` is a 32-bit `ULONG`, so a context handle is its slot index plus one.
-- **Pixel format.** It must set `PFD_SUPPORT_COMPOSITION`, or `opengl32.dll` never calls `DrvCreateContext`. It has a 24-bit depth buffer, because `ChoosePixelFormat` skips a format without the depth an app asks for, unless the app sets `PFD_DEPTH_DONTCARE`.
+- **Pixel format.** It must set `PFD_SUPPORT_COMPOSITION`, or `opengl32.dll` never calls `DrvCreateContext`. It has 24 depth and 8 stencil bits. `ChoosePixelFormat` skips a format without depth unless the app sets `PFD_DEPTH_DONTCARE`, and SDL2 skips one with fewer depth or stencil bits than the app asks for, so it picks Microsoft's GDI Generic renderer instead.
 - **Framebuffer.** A bottom-up 32-bit DIB, so rows are in GL order. `StretchDIBits` presents it.
 
 ## Rasterizer
 
-- **GL 1.1 fixed function.** Immediate-mode triangles, quads and polygons, without lighting, lines or points. The depth compare runs before texturing to skip hidden fragments, and the depth write waits for the alpha test, which keeps GL 1.1's results.
+- **GL 1.1 fixed function.** Immediate-mode triangles, quads and polygons, without lighting, lines or points. The depth compare runs before texturing to skip hidden fragments, unless the stencil test is on, since a depth failure then still updates the stencil. The depth write waits for the alpha test, which keeps GL 1.1's results.
 - **Clipping.** Triangles are clipped in clip space against the six frustum planes, so window coordinates stay inside the viewport.
 - **Fixed point.** Edge functions in 64-bit with 4 subpixel bits. A guard band of 2^19 pixels bounds huge viewports, so products reach 2^48.
 - **Interpolation.** Attributes are perspective-correct. Depth is linear in window space and stored as float.
@@ -71,5 +71,4 @@ softgpu is a software OpenGL driver for Windows, in plain C. Its goal is to run 
 |---|---|
 | Framebuffer per window | An app draws into one window from two contexts, or swaps a DC that is not current. |
 | Log file | A game that only starts through a launcher, so nobody can redirect its `stderr`. |
-| Stencil buffer | A game that draws with the stencil test, like QuakeSpasm with `r_shadows`. |
 | SIMD and 32-bit edge stepping | A profile shows the rasterizer. Step in 32-bit inside tiles after 64-bit setup. |

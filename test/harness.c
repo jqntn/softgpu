@@ -19,6 +19,8 @@ typedef void(APIENTRY* FrustumFn)(GLdouble, GLdouble, GLdouble, GLdouble,
                                   GLdouble, GLdouble);
 typedef void(APIENTRY* TexImage2DFn)(GLenum, GLint, GLint, GLsizei, GLsizei,
                                      GLint, GLenum, GLenum, const GLvoid*);
+typedef void(APIENTRY* StencilFuncFn)(GLenum, GLint, GLuint);
+typedef void(APIENTRY* StencilOpFn)(GLenum, GLenum, GLenum);
 typedef void(APIENTRY* ReadPixelsFn)(GLint, GLint, GLsizei, GLsizei, GLenum,
                                      GLenum, GLvoid*);
 
@@ -141,6 +143,24 @@ static void TestPipeline(const ProcTable* table, int width, int height) {
   Quad(table, -1.0f, -1.0f, 0.0f, 0.0f, 0.0f);
   ((EnumFn)table->entries[kGlDisable])(GL_BLEND);
   ExpectColor(table, left, bottom, RGB(255, 128, 128));
+
+  ((ClearFn)table->entries[kGlClear])(GL_DEPTH_BUFFER_BIT |
+                                      GL_STENCIL_BUFFER_BIT);
+  ((EnumFn)table->entries[kGlEnable])(GL_DEPTH_TEST);
+  ((EnumFn)table->entries[kGlEnable])(GL_STENCIL_TEST);
+  ((StencilFuncFn)table->entries[kGlStencilFunc])(GL_ALWAYS, 1, ~0u);
+  ((StencilOpFn)table->entries[kGlStencilOp])(GL_KEEP, GL_INCR, GL_REPLACE);
+  Quad(table, -1.0f, -1.0f, 0.0f, 1.0f, 0.0f);
+  ((Color4fFn)table->entries[kGlColor4f])(0.0f, 1.0f, 0.0f, 1.0f);
+  Quad(table, -1.0f, -1.0f, 1.0f, 1.0f, 0.5f);
+  ((EnumFn)table->entries[kGlDisable])(GL_DEPTH_TEST);
+  ((StencilFuncFn)table->entries[kGlStencilFunc])(GL_EQUAL, 2, ~0u);
+  ((StencilOpFn)table->entries[kGlStencilOp])(GL_KEEP, GL_KEEP, GL_KEEP);
+  ((Color4fFn)table->entries[kGlColor4f])(1.0f, 0.0f, 0.0f, 1.0f);
+  Quad(table, -1.0f, -1.0f, 1.0f, 1.0f, 0.0f);
+  ((EnumFn)table->entries[kGlDisable])(GL_STENCIL_TEST);
+  ExpectColor(table, left, height / 2, RGB(255, 0, 0));
+  ExpectColor(table, right, height / 2, RGB(0, 255, 0));
 
   ((EnumFn)table->entries[kGlMatrixMode])(GL_PROJECTION);
   ((FrustumFn)table->entries[kGlFrustum])(-1.0, 1.0, -1.0, 1.0, 1.0, 10.0);

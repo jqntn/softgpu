@@ -15,6 +15,8 @@ enum {
   kPixelFormatCount = 1,
   kChannelBits = 8,
   kDepthBits = 24,
+  kStencilBits = 8,
+  kStencilMax = (1 << kStencilBits) - 1,
   kSubpixels = 16,
   kGuardBand = 1 << 19,
   kModelviewDepth = 32,
@@ -73,7 +75,9 @@ typedef struct Context {
   int height;
   uint32_t* pixels;
   float* depth;
+  uint8_t* stencil;
   uint32_t clear_color;
+  GLuint clear_stencil;
   bool attached;
   int viewport[4];
   int scissor[4];
@@ -97,6 +101,14 @@ typedef struct Context {
   bool depth_test;
   bool depth_mask;
   GLenum depth_func;
+  bool stencil_test;
+  GLenum stencil_func;
+  int stencil_ref;
+  GLuint stencil_value_mask;
+  GLenum stencil_fail;
+  GLenum stencil_zfail;
+  GLenum stencil_zpass;
+  GLuint stencil_writemask;
   bool alpha_test;
   GLenum alpha_func;
   float alpha_ref;
@@ -221,6 +233,16 @@ static void APIENTRY ClearColor(GLclampf red, GLclampf green, GLclampf blue,
   current->clear_color = PackColor((float[4]){red, green, blue, alpha});
 }
 
+static void WriteStencil(const Context* context, uint8_t* stencil,
+                         GLuint value) {
+  *stencil = (uint8_t)((*stencil & ~context->stencil_writemask) |
+                       (value & context->stencil_writemask));
+}
+
+static void APIENTRY ClearStencil(GLint s) {
+  current->clear_stencil = (GLuint)s & kStencilMax;
+}
+
 static void APIENTRY Clear(GLbitfield mask) {
   Context* context = current;
   int x0 = 0;
@@ -234,6 +256,7 @@ static void APIENTRY Clear(GLbitfield mask) {
     y1 = MinInt(y1, context->scissor[1] + context->scissor[3]);
   }
   bool depth = (mask & GL_DEPTH_BUFFER_BIT) && context->depth_mask;
+  bool stencil = mask & GL_STENCIL_BUFFER_BIT;
   for (int y = y0; y < y1; y++) {
     size_t row = (size_t)y * (size_t)context->width;
     for (int x = x0; x < x1; x++) {
@@ -242,6 +265,10 @@ static void APIENTRY Clear(GLbitfield mask) {
       }
       if (depth) {
         context->depth[row + x] = 1.0f;
+      }
+      if (stencil) {
+        WriteStencil(context, &context->stencil[row + x],
+                     context->clear_stencil);
       }
     }
   }
@@ -277,7 +304,7 @@ static void APIENTRY GetIntegerv(GLenum pname, GLint* params) {
       *params = kDepthBits;
       break;
     case GL_STENCIL_BITS:
-      *params = 0;
+      *params = kStencilBits;
       break;
     default:
       Unimplemented(&reported, "GetIntegerv with this parameter");
@@ -474,13 +501,39 @@ static void Blend(const Context* context, uint32_t pixel, float color[4]) {
   }
 }
 
+static void ApplyStencilOp(const Context* context, GLenum op,
+                           uint8_t* stencil) {
+  int value = *stencil;
+  switch (op) {
+    case GL_ZERO:
+      value = 0;
+      break;
+    case GL_REPLACE:
+      value = context->stencil_ref;
+      break;
+    case GL_INCR:
+      value = MinInt(value + 1, kStencilMax);
+      break;
+    case GL_DECR:
+      value = MaxInt(value - 1, 0);
+      break;
+    case GL_INVERT:
+      value = ~value;
+      break;
+    default:
+      return;
+  }
+  WriteStencil(context, stencil, (GLuint)value);
+}
+
 static void Shade(Context* context, const Setup* setup, size_t index,
                   const float weight[3]) {
   const Corner* const* v = setup->corners;
   float z = Clamp01(weight[0] * v[0]->z + weight[1] * v[1]->z +
                     weight[2] * v[2]->z + setup->offset);
-  if (context->depth_test &&
-      !Compare(context->depth_func, z, context->depth[index])) {
+  bool depth_pass = !context->depth_test ||
+                    Compare(context->depth_func, z, context->depth[index]);
+  if (!depth_pass && !context->stencil_test) {
     return;
   }
   float w =
@@ -507,6 +560,22 @@ static void Shade(Context* context, const Setup* setup, size_t index,
   }
   if (context->alpha_test &&
       !Compare(context->alpha_func, color[kAlpha], context->alpha_ref)) {
+    return;
+  }
+  if (context->stencil_test) {
+    uint8_t* stencil = &context->stencil[index];
+    GLuint mask = context->stencil_value_mask;
+    if (!Compare(context->stencil_func,
+                 (float)((GLuint)context->stencil_ref & mask),
+                 (float)(*stencil & mask))) {
+      ApplyStencilOp(context, context->stencil_fail, stencil);
+      return;
+    }
+    ApplyStencilOp(context,
+                   depth_pass ? context->stencil_zpass : context->stencil_zfail,
+                   stencil);
+  }
+  if (!depth_pass) {
     return;
   }
   if (context->depth_test && context->depth_mask) {
@@ -992,6 +1061,9 @@ static void SetCapability(GLenum cap, bool value) {
     case GL_SCISSOR_TEST:
       context->scissor_test = value;
       break;
+    case GL_STENCIL_TEST:
+      context->stencil_test = value;
+      break;
     case GL_TEXTURE_2D:
       context->texture_2d = value;
       break;
@@ -1044,6 +1116,40 @@ static void APIENTRY DepthFunc(GLenum func) {
 
 static void APIENTRY DepthMask(GLboolean flag) {
   current->depth_mask = flag != GL_FALSE;
+}
+
+static void APIENTRY StencilFunc(GLenum func, GLint ref, GLuint mask) {
+  if (func >= GL_NEVER && func <= GL_ALWAYS) {
+    current->stencil_func = func;
+    current->stencil_ref = ClampInt(ref, 0, kStencilMax);
+    current->stencil_value_mask = mask;
+  }
+}
+
+static bool IsStencilOp(GLenum op) {
+  switch (op) {
+    case GL_KEEP:
+    case GL_ZERO:
+    case GL_REPLACE:
+    case GL_INCR:
+    case GL_DECR:
+    case GL_INVERT:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static void APIENTRY StencilOp(GLenum fail, GLenum zfail, GLenum zpass) {
+  if (IsStencilOp(fail) && IsStencilOp(zfail) && IsStencilOp(zpass)) {
+    current->stencil_fail = fail;
+    current->stencil_zfail = zfail;
+    current->stencil_zpass = zpass;
+  }
+}
+
+static void APIENTRY StencilMask(GLuint mask) {
+  current->stencil_writemask = mask;
 }
 
 static void APIENTRY AlphaFunc(GLenum func, GLclampf ref) {
@@ -1515,6 +1621,7 @@ static ProcTable table = {
             [kGlBlendFunc] = (PROC)BlendFunc,
             [kGlClear] = (PROC)Clear,
             [kGlClearColor] = (PROC)ClearColor,
+            [kGlClearStencil] = (PROC)ClearStencil,
             [kGlColor3f] = (PROC)Color3f,
             [kGlColor3fv] = (PROC)Color3fv,
             [kGlColor4f] = (PROC)Color4f,
@@ -1553,6 +1660,9 @@ static ProcTable table = {
             [kGlScalef] = (PROC)Scalef,
             [kGlScissor] = (PROC)Scissor,
             [kGlShadeModel] = (PROC)ShadeModel,
+            [kGlStencilFunc] = (PROC)StencilFunc,
+            [kGlStencilMask] = (PROC)StencilMask,
+            [kGlStencilOp] = (PROC)StencilOp,
             [kGlTexCoord2f] = (PROC)TexCoord2f,
             [kGlTexEnvf] = (PROC)TexEnvf,
             [kGlTexEnvi] = (PROC)TexEnvi,
@@ -1584,11 +1694,13 @@ static BOOL Resize(Context* context, HDC hdc) {
   if (rect.right != context->width || rect.bottom != context->height) {
     free(context->pixels);
     free(context->depth);
+    free(context->stencil);
     context->width = rect.right;
     context->height = rect.bottom;
     size_t count = (size_t)context->width * (size_t)context->height;
     context->pixels = count ? Allocate(count * sizeof(uint32_t)) : NULL;
     context->depth = count ? Allocate(count * sizeof(float)) : NULL;
+    context->stencil = count ? Allocate(count) : NULL;
   }
   return TRUE;
 }
@@ -1634,6 +1746,7 @@ LONG APIENTRY DrvDescribePixelFormat(HDC hdc, INT format, ULONG size,
       .cAlphaBits = kChannelBits,
       .cAlphaShift = 24,
       .cDepthBits = kDepthBits,
+      .cStencilBits = kStencilBits,
       .iLayerType = PFD_MAIN_PLANE,
   };
   return kPixelFormatCount;
@@ -1657,6 +1770,12 @@ ULONG APIENTRY DrvCreateContext(HDC hdc) {
           .front_face = GL_CCW,
           .depth_mask = true,
           .depth_func = GL_LESS,
+          .stencil_func = GL_ALWAYS,
+          .stencil_value_mask = ~0u,
+          .stencil_fail = GL_KEEP,
+          .stencil_zfail = GL_KEEP,
+          .stencil_zpass = GL_KEEP,
+          .stencil_writemask = ~0u,
           .alpha_func = GL_ALWAYS,
           .blend_src = GL_ONE,
           .blend_dst = GL_ZERO,
@@ -1689,6 +1808,7 @@ BOOL APIENTRY DrvDeleteContext(ULONG handle) {
   }
   free(context->pixels);
   free(context->depth);
+  free(context->stencil);
   *context = (Context){0};
   atomic_store(&used[handle - 1], 0);
   return TRUE;
