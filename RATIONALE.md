@@ -56,7 +56,7 @@ softgpu is a software OpenGL driver for Windows, in plain C. Its goal is to run 
 ## Direction
 
 - **Scope.** OpenGL 1.1 fixed-function games, the version softgpu reports, driven by apitrace captures replayed as regression tests. The rest of GL 1.1 comes in the order real games report it on `stderr`.
-- **Speed.** Plain C, in this order: no C runtime calls per pixel, screen tiles across threads, block coverage tests in the rasterizer, then pixel loops over small blocks that compilers vectorize. A profile picks each step, and none may cost readability.
+- **Speed.** Plain C, in this order: no C runtime calls per pixel, screen tiles across threads, block coverage tests in the rasterizer, then pixel loops over small blocks that compilers vectorize. A profile picks each step, and none may cost readability. Profiles and tuning use MSVC Release builds; the other toolchains only have to build.
 
 ## Rejected
 

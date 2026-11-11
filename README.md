@@ -32,6 +32,10 @@ scripts\uninstall.ps1
 
 softgpu then drives every OpenGL app until uninstalled or until a GPU driver update. Both scripts restart the display drivers, so the screen goes black for a few seconds and GPU apps may lose their state.
 
+## Performance
+
+This project aims for the speed of [llvmpipe](https://gitlab.freedesktop.org/mesa/mesa/-/tree/main/src/gallium/drivers/llvmpipe) and the simplicity of [softpipe](https://gitlab.freedesktop.org/mesa/mesa/-/tree/main/src/gallium/drivers/softpipe): readable C, no JIT. MSVC is the primary optimization target.
+
 ## Supported games
 
 - Quake, through [QuakeSpasm](https://quakespasm.sourceforge.net/) 0.97.0, 32-bit and 64-bit.
