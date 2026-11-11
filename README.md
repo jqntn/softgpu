@@ -2,7 +2,7 @@
 
 A software GPU for Windows: an OpenGL 1.1 driver in plain C that renders on the CPU.
 
-![The triangle sample rendered by softgpu](samples/triangle.png)
+![The triangle sample rendered by softgpu](docs/triangle.png)
 
 ## Build
 
