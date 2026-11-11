@@ -18,7 +18,7 @@ softgpu is a software OpenGL driver for Windows, in plain C. Its goal is to run 
 - **Include order.** `<GL/gl.h>` needs `<windows.h>` first. Put code between them, so include sorting cannot reorder them.
 - **No comments in code.**
 - **Limits.** Use fixed-size arrays with explicit limits.
-- **Layout.** One file, so the per-pixel path inlines without link-time optimization. Each function comes before its first caller: limits, types and state, helpers, the pixel pipeline from texture sampling to `Rasterize`, geometry from matrices to `EmitVertex`, then GL entry points in pipeline order (vertices, transform, capabilities, rasterization, textures, fragment operations, framebuffer, queries), the dispatch table, and the `Drv*` functions in the order `opengl32.dll` calls them.
+- **Layout.** One file, so the per-pixel path inlines without link-time optimization. Each function comes before its first caller: limits, types and state, helpers, the pixel pipeline from texture sampling to the triangle, line and point rasterizers, geometry from matrices to `EmitVertex`, then GL entry points in pipeline order (vertices, vertex arrays, evaluators, transform, lighting, raster position, capabilities, rasterization, pixel rectangles, textures, fragment operations, framebuffer, selection and feedback, attribute stacks, display lists, queries), context setup, and the `Drv*` functions in the order `opengl32.dll` calls them.
 - **Commits.** Atomic, with a Conventional Commits subject line only.
 
 ## Build
@@ -30,33 +30,35 @@ softgpu is a software OpenGL driver for Windows, in plain C. Its goal is to run 
 
 - **Loading.** `opengl32.dll` loads the DLL named by `OpenGLDriverName` (`OpenGLDriverNameWow` for 32-bit apps) in the display adapter's registry key. Windows caches the name when the display driver starts.
 - **Exports.** `icd.def` exports the `Drv*` functions by plain name, because x86 `__stdcall` decorates them and `opengl32.dll` looks them up undecorated.
-- **Dispatch.** The 336 GL 1.1 entries follow `GLDISPATCHTABLE` in Mesa's `gldrv.h`. Each unimplemented entry is a typed stub that returns 0 and reports itself on `stderr` once, so a real app lists what to implement next.
+- **Dispatch.** The 336 GL 1.1 entries follow `GLDISPATCHTABLE` in Mesa's `gldrv.h`. One X-macro in `icd.h` lists them, and the table maps each to the function of the same name.
 - **Handles.** `DHGLRC` is a 32-bit `ULONG`, so a context handle is its slot index plus one.
-- **Pixel format.** It must set `PFD_SUPPORT_COMPOSITION`, or `opengl32.dll` never calls `DrvCreateContext`. It has 24 depth and 8 stencil bits. `ChoosePixelFormat` skips a format without depth unless the app sets `PFD_DEPTH_DONTCARE`, and SDL2 skips one with fewer depth or stencil bits than the app asks for, so it picks Microsoft's GDI Generic renderer instead.
-- **Framebuffer.** A bottom-up 32-bit DIB, so rows are in GL order. `StretchDIBits` presents it.
-- **Swap interval.** `WGL_EXT_swap_control` comes through `DrvGetProcAddress`. Both extension string queries list it, since SDL2 only asks the ARB one, and `GL_EXTENSIONS` lists it too, as its spec allows for older games. GDI cannot flip on the refresh, so `DrvSwapBuffers` presents, then calls `DwmFlush` once per interval, which returns after DWM's next composition. Mesa's WGL sleeps on a timer instead, which drifts from the refresh.
+- **Pixel format.** It must set `PFD_SUPPORT_COMPOSITION`, or `opengl32.dll` never calls `DrvCreateContext`. It has 24 depth, 8 stencil and 64 accumulation bits. `ChoosePixelFormat` skips a format without depth unless the app sets `PFD_DEPTH_DONTCARE`, and SDL2 skips one with fewer depth or stencil bits than the app asks for, so it picks Microsoft's GDI Generic renderer instead.
+- **Framebuffer.** Each window has one framebuffer, which every context drawing to it shares, as WGL requires. A window's framebuffer is freed once the window is gone. Front and back color buffers are bottom-up 32-bit DIBs, so rows are in GL order. `DrvSwapBuffers` copies back to front, as `PFD_SWAP_COPY` promises, and `StretchDIBits` presents the front. `glFlush` and `glFinish` present the front buffer once something drew to it. Depth is float, stencil 8-bit, and the accumulation buffer 16-bit signed per channel, allocated on first use.
+- **Swap interval.** `WGL_EXT_swap_control` comes through `DrvGetProcAddress`. Both extension string queries list it, since SDL2 only asks the ARB one, and `GL_EXTENSIONS` lists it too, as its spec allows for older games. GDI cannot flip on the refresh, so `DrvSwapBuffers` presents, then calls `DwmFlush` once per interval of the window, which returns after DWM's next composition. Mesa's WGL sleeps on a timer instead, which drifts from the refresh.
 
 ## Rasterizer
 
-- **GL 1.1 fixed function.** Immediate-mode triangles, quads and polygons, without lighting, lines or points. The depth compare runs before texturing to skip hidden fragments, unless the stencil test is on, since a depth failure then still updates the stencil. The depth write waits for the alpha test, which keeps GL 1.1's results.
-- **Clipping.** Triangles are clipped in clip space against the six frustum planes, so window coordinates stay inside the viewport.
-- **Fixed point.** Edge functions in 64-bit with 4 subpixel bits. A guard band of 2^19 pixels bounds huge viewports, so products reach 2^48.
-- **Interpolation.** Attributes are perspective-correct. Depth is linear in window space and stored as float.
+- **GL 1.1 fixed function.** All of GL 1.1 in RGBA mode: immediate mode, vertex arrays, display lists, lighting, texture coordinate generation, evaluators, selection, feedback, pixel transfer and the accumulation buffer. No pixel format has color index, so index calls only set their state. The depth compare runs before texturing to skip hidden fragments, unless the stencil test is on, since a depth failure then still updates the stencil. The depth write waits for the alpha test, which keeps GL 1.1's results.
+- **Display lists.** Each command is recorded as an `Op` with up to nine arguments, and `ExecuteList` replays it through the same entry point. Pixel data is unpacked at compile time and stored tightly packed, as the spec requires. `glDrawArrays` and `glDrawElements` compile to their vertices behind a `kOpArrays` marker, so a replay inside `glBegin` skips them with an error, as the call would.
+- **Clipping.** Primitives are clipped in clip space against the six frustum planes and six user planes, so window coordinates stay inside the viewport. A polygon is clipped whole, and the edges that clipping creates are boundary edges for `glPolygonMode`.
+- **Fixed point.** Window x and y round to 4 subpixel bits, so culling, the 64-bit edge functions and the float paths for lines, points and smooth polygons see the same positions. A guard band of 2^19 pixels bounds huge viewports, so products reach 2^48.
+- **Interpolation.** Attributes are perspective-correct. Depth is linear in window space and stored as float. It interpolates as offsets from the first corner, so a flat polygon keeps its exact depth and one polygon offset unit still separates it. Fog interpolates signed eye z and takes its magnitude per fragment, so a polygon crossing the eye plane is not fogged near the eye.
 - **Float math.** MSVC calls `fminf`, `fmaxf` and `floorf` out of line, so pixel code uses `MinFloat`, `MaxFloat` and `Floor`, which return the same values, NaN included. Lambda is skipped when both texture filters match, since it cannot change the texel. `log2f` stays for mipmapping, because an approximation would change pixels.
-- **Textures.** One table of 4096 names shared by all contexts, as `DrvShareLists` promises. Power-of-two RGBA8 images up to 2048, with `GL_REPEAT` and GL 1.1's mipmap selection.
+- **Textures.** 1D and 2D RGBA8 images up to 2048 plus borders, with `GL_CLAMP`, `GL_REPEAT` and GL 1.1's mipmap selection. Texture and display list names are sorted arrays in a group that `DrvShareLists` shares between contexts.
 - **Fill rule.** Both windings draw. `GL_CULL_FACE` culls by window-space winding, as `glFrontFace` and `glCullFace` set. A top-left rule in GL's y-up space draws shared edges once. Its bias stays out of the interpolation weights, or depth drifts on small triangles and hidden faces show through.
+- **Lines and points.** Aliased lines step the major axis at pixel centers, which the spec allows in place of the diamond-exit rule. Wide lines repeat along the minor axis. Smooth lines, points and polygons scale alpha by coverage. A smooth polygon takes 4x4 samples per pixel against the whole outline, so its fan triangles leave no seams.
 
 ## Development
 
 - **harness** plays the part of `opengl32.dll`, so CI can run it without installing the driver.
 - **wgltest** and the samples need softgpu installed, so CI only builds them.
-- **Reports.** GUI games inherit `stderr`, so redirect it at launch: `game.exe 2> softgpu.log` in cmd, or `Start-Process game.exe -RedirectStandardError softgpu.log -Wait` in PowerShell. PowerShell's `2>` captures nothing from a GUI app.
+- **Piglit.** Its OpenGL 1.0, 1.1 and WGL groups pass, except tests that use later features without checking the version: BGR and packed pixel types, compressed, depth and depth-stencil formats, `GL_GENERATE_MIPMAP`, texture depth and stencil size queries, 3D and cube map targets, `glEnable(GL_VERTEX_ARRAY)`, scalar forms of vector parameters, and luminance from `glGetTexImage` as red alone. GL 1.1 rejects all of these or, for the last, sums red, green and blue as `glReadPixels` does.
 - **Install.** The scripts keep the original driver names as `Softgpu<Name>` values beside them and keep each value's registry type. A second install keeps the first backup. Uninstall leaves a name alone when a driver update already replaced softgpu. `restart.ps1` restarts the display devices, because of the cached name. The scripts must run in Windows PowerShell 5.1 and PowerShell 7.
 - **Benchmarks.** Time Release builds in a focused window. QuakeSpasm sleeps 16 ms per frame without input focus.
 
 ## Direction
 
-- **Scope.** OpenGL 1.1 fixed-function games, the version softgpu reports, driven by apitrace captures replayed as regression tests. The rest of GL 1.1 comes in the order real games report it on `stderr`.
+- **Scope.** OpenGL 1.1 fixed-function games, the version softgpu reports, driven by apitrace captures replayed as regression tests. Piglit's OpenGL 1.0 and 1.1 tests check conformance.
 - **Speed.** Plain C, in this order: no C runtime calls per pixel, screen tiles across threads, block coverage tests in the rasterizer, then pixel loops over small blocks that compilers vectorize. A profile picks each step, and none may cost readability. Profiles and tuning use MSVC Release builds; the other toolchains only have to build.
 
 ## Rejected
@@ -75,8 +77,6 @@ softgpu is a software OpenGL driver for Windows, in plain C. Its goal is to run 
 
 | Option | Trigger |
 |---|---|
-| Framebuffer and swap interval per window | An app draws into one window from two contexts, or swaps a DC that is not current. |
-| Log file | A game that only starts through a launcher, so nobody can redirect its `stderr`. |
 | Hand-written SSE2 | After the plain-C speed steps, a profile still shows per-pixel math that the compiler did not vectorize. |
 | 32-bit edge stepping | A profile shows edge stepping, a small share of the time today. Step in 32-bit inside tiles after 64-bit setup. |
 | GL 2.0 and shaders | A game that needs GL 2.0. GLSL then goes through glslang and the SPIRV-Tools optimizer to SPIR-V, decoded once and interpreted over pixel blocks, with no IR of softgpu's own. Fixed function moves onto shaders only once they run faster. |
