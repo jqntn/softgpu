@@ -30,7 +30,7 @@ scripts\install.ps1
 scripts\uninstall.ps1
 ```
 
-softgpu then drives every OpenGL app until uninstalled or until a GPU driver update. Both scripts restart the display drivers, so the screen goes black for a few seconds and GPU apps may lose their state.
+softgpu then drives every OpenGL app until uninstalled or until a GPU driver update.
 
 ## Performance
 
