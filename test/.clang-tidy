@@ -1,0 +1,4 @@
+InheritParentConfig: true
+CheckOptions:
+  readability-identifier-naming.GetConfigPerFile: false
+  readability-identifier-naming.MemberIgnoredRegexp: "^[A-Z][A-Za-z0-9]*$"
