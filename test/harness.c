@@ -81,7 +81,8 @@ static void Quad(const ProcTable* table, GLfloat x0, GLfloat y0, GLfloat x1,
   static const GLfloat kCorners[] = {0, 0, 1, 0, 1, 1, 0, 1};
   ((EnumFn)table->entries[kGlBegin])(GL_QUADS);
   for (int i = 0; i < 8; i += 2) {
-    ((Vertex2fFn)table->entries[kGlTexCoord2f])(kCorners[i], kCorners[i + 1]);
+    ((Vertex2fFn)table->entries[kGlTexCoord2f])(kCorners[i] - 1.0f,
+                                                kCorners[i + 1] - 1.0f);
     ((Vertex3fFn)table->entries[kGlVertex3f])(kCorners[i] ? x1 : x0,
                                               kCorners[i + 1] ? y1 : y0, z);
   }

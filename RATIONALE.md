@@ -40,6 +40,7 @@ softgpu is a software OpenGL driver for Windows, in plain C. Its goal is to run 
 - **Clipping.** Triangles are clipped in clip space against the six frustum planes, so window coordinates stay inside the viewport.
 - **Fixed point.** Edge functions in 64-bit with 4 subpixel bits. A guard band of 2^19 pixels bounds huge viewports, so products reach 2^48.
 - **Interpolation.** Attributes are perspective-correct. Depth is linear in window space and stored as float.
+- **Float math.** MSVC calls `fminf`, `fmaxf` and `floorf` out of line, so pixel code uses `MinFloat`, `MaxFloat` and `Floor`, which return the same values, NaN included. Lambda is skipped when both texture filters match, since it cannot change the texel. `log2f` stays for mipmapping, because an approximation would change pixels.
 - **Textures.** One table of 4096 names shared by all contexts, as `DrvShareLists` promises. Power-of-two RGBA8 images up to 2048, with `GL_REPEAT` and GL 1.1's mipmap selection.
 - **Fill rule.** Both windings draw. `GL_CULL_FACE` culls by window-space winding, as `glFrontFace` and `glCullFace` set. A top-left rule in GL's y-up space draws shared edges once. Its bias stays out of the interpolation weights, or depth drifts on small triangles and hidden faces show through.
 

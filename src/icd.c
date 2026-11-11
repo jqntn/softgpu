@@ -34,6 +34,7 @@ static const float kIdentity[16] = {1, 0, 0, 0, 0, 1, 0, 0,
                                     0, 0, 1, 0, 0, 0, 0, 1};
 static const float kRadiansPerDegree = 0.0174532925f;
 static const float kDepthUnit = 1.0f / 16777216.0f;
+static const float kIntegralFloat = 8388608.0f;
 
 typedef struct Vertex {
   float position[4];
@@ -160,7 +161,23 @@ static void Unimplemented(atomic_flag* reported, const char* name) {
   }
 }
 
-static float Clamp01(float value) { return fminf(fmaxf(value, 0.0f), 1.0f); }
+static float MinFloat(float a, float b) { return a < b ? a : b; }
+
+static float MaxFloat(float a, float b) { return a > b ? a : b; }
+
+static float Clamp01(float value) {
+  return MinFloat(MaxFloat(value, 0.0f), 1.0f);
+}
+
+static float Floor(float value) {
+  if (!(value > -kIntegralFloat && value < kIntegralFloat)) {
+    return value;
+  }
+  float truncated = (float)(int32_t)value;
+  return truncated > value ? truncated - 1.0f : truncated;
+}
+
+static float Ceil(float value) { return -Floor(-value); }
 
 static int ClampInt(int value, int low, int high) {
   return value < low ? low : (value > high ? high : value);
@@ -313,7 +330,7 @@ static void APIENTRY GetIntegerv(GLenum pname, GLint* params) {
 
 static float ToWindow(float ndc, int origin, int size) {
   float window = (ndc + 1.0f) * 0.5f * (float)size + (float)origin;
-  return fmaxf(-(float)kGuardBand, fminf(window, (float)kGuardBand));
+  return MaxFloat(MinFloat(window, (float)kGuardBand), -(float)kGuardBand);
 }
 
 static int CompleteLevels(const Texture* texture) {
@@ -341,8 +358,8 @@ static void SampleLevel(const Level* level, GLenum filter, float s, float t,
                         float texel[4]) {
   int mask_x = level->width - 1;
   int mask_y = level->height - 1;
-  float u = (s - floorf(s)) * (float)level->width;
-  float v = (t - floorf(t)) * (float)level->height;
+  float u = (s - Floor(s)) * (float)level->width;
+  float v = (t - Floor(t)) * (float)level->height;
   if (filter == GL_NEAREST) {
     const uint8_t* p =
         level->texels[((int)v & mask_y) * level->width + ((int)u & mask_x)];
@@ -353,8 +370,8 @@ static void SampleLevel(const Level* level, GLenum filter, float s, float t,
   }
   u -= 0.5f;
   v -= 0.5f;
-  float left = floorf(u);
-  float bottom = floorf(v);
+  float left = Floor(u);
+  float bottom = Floor(v);
   float a = u - left;
   float b = v - bottom;
   int i0 = (int)left & mask_x;
@@ -387,10 +404,10 @@ static void SampleTexture(const Texture* texture, int levels, float s, float t,
     return;
   }
   GLenum filter = nearest ? GL_NEAREST : GL_LINEAR;
-  float d = fminf(lambda, (float)(levels - 1));
+  float d = MinFloat(lambda, (float)(levels - 1));
   if (minify == GL_NEAREST_MIPMAP_NEAREST ||
       minify == GL_LINEAR_MIPMAP_NEAREST) {
-    int level = d <= 0.5f ? 0 : (int)ceilf(d + 0.5f) - 1;
+    int level = d <= 0.5f ? 0 : (int)Ceil(d + 0.5f) - 1;
     SampleLevel(&texture->levels[level], filter, s, t, texel);
     return;
   }
@@ -414,7 +431,7 @@ static float Lambda(const Setup* setup, const float varying[kVaryings],
     const float* d = setup->derivative[axis];
     float du = (d[0] - varying[kS] * d[2]) * w * (float)base->width;
     float dv = (d[1] - varying[kT] * d[2]) * w * (float)base->height;
-    rho = fmaxf(rho, du * du + dv * dv);
+    rho = MaxFloat(du * du + dv * dv, rho);
   }
   return 0.5f * log2f(rho);
 }
@@ -479,7 +496,7 @@ static float Factor(GLenum factor, const float source[4],
     case GL_ONE_MINUS_DST_ALPHA:
       return 1.0f - destination[3];
     case GL_SRC_ALPHA_SATURATE:
-      return channel == 3 ? 1.0f : fminf(source[3], 1.0f - destination[3]);
+      return channel == 3 ? 1.0f : MinFloat(source[3], 1.0f - destination[3]);
     default:
       return 0.0f;
   }
@@ -547,8 +564,11 @@ static void Shade(Context* context, const Setup* setup, size_t index,
   float* color = varying;
   if (setup->texture) {
     float texel[4];
+    float lambda = setup->texture->min_filter == setup->texture->mag_filter
+                       ? 0.0f
+                       : Lambda(setup, varying, w);
     SampleTexture(setup->texture, setup->levels, varying[kS], varying[kT],
-                  Lambda(setup, varying, w), texel);
+                  lambda, texel);
     ApplyTexture(context->texture_env_mode, setup->texture->format, texel,
                  color);
   }
@@ -654,14 +674,18 @@ static void Rasterize(Context* context, const Vertex* const input[3]) {
     area = -area;
   }
 
-  int min_x = ClampInt((int)floorf(fminf(v[0]->x, fminf(v[1]->x, v[2]->x))),
-                       clip_x0, clip_x1 - 1);
-  int max_x = ClampInt((int)floorf(fmaxf(v[0]->x, fmaxf(v[1]->x, v[2]->x))),
-                       clip_x0, clip_x1 - 1);
-  int min_y = ClampInt((int)floorf(fminf(v[0]->y, fminf(v[1]->y, v[2]->y))),
-                       clip_y0, clip_y1 - 1);
-  int max_y = ClampInt((int)floorf(fmaxf(v[0]->y, fmaxf(v[1]->y, v[2]->y))),
-                       clip_y0, clip_y1 - 1);
+  int min_x =
+      ClampInt((int)Floor(MinFloat(v[0]->x, MinFloat(v[1]->x, v[2]->x))),
+               clip_x0, clip_x1 - 1);
+  int max_x =
+      ClampInt((int)Floor(MaxFloat(v[0]->x, MaxFloat(v[1]->x, v[2]->x))),
+               clip_x0, clip_x1 - 1);
+  int min_y =
+      ClampInt((int)Floor(MinFloat(v[0]->y, MinFloat(v[1]->y, v[2]->y))),
+               clip_y0, clip_y1 - 1);
+  int max_y =
+      ClampInt((int)Floor(MaxFloat(v[0]->y, MaxFloat(v[1]->y, v[2]->y))),
+               clip_y0, clip_y1 - 1);
 
   int64_t px = (int64_t)min_x * kSubpixels + kSubpixels / 2;
   int64_t py = (int64_t)min_y * kSubpixels + kSubpixels / 2;
@@ -694,7 +718,7 @@ static void Rasterize(Context* context, const Vertex* const input[3]) {
       for (int k = 0; k < 3; k++) {
         dz += gradient[axis][k] * v[k]->z;
       }
-      slope = fmaxf(slope, fabsf(dz));
+      slope = MaxFloat(fabsf(dz), slope);
     }
     setup.offset = context->polygon_offset[0] * slope +
                    context->polygon_offset[1] * kDepthUnit;
