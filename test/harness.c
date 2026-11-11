@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "icd.h"
 
@@ -21,6 +22,11 @@ typedef void(APIENTRY* TexImage2DFn)(GLenum, GLint, GLint, GLsizei, GLsizei,
                                      GLint, GLenum, GLenum, const GLvoid*);
 typedef void(APIENTRY* StencilFuncFn)(GLenum, GLint, GLuint);
 typedef void(APIENTRY* StencilOpFn)(GLenum, GLenum, GLenum);
+typedef const GLubyte*(APIENTRY* GetStringFn)(GLenum);
+typedef const char*(WINAPI* ExtensionsArbFn)(HDC);
+typedef const char*(WINAPI* ExtensionsExtFn)(void);
+typedef BOOL(WINAPI* SwapIntervalFn)(int);
+typedef int(WINAPI* GetSwapIntervalFn)(void);
 typedef void(APIENTRY* ReadPixelsFn)(GLint, GLint, GLsizei, GLsizei, GLenum,
                                      GLenum, GLvoid*);
 
@@ -99,6 +105,36 @@ static void ExpectColor(const ProcTable* table, int x, int y,
     fprintf(stderr, "color (%d, %d) is %06lx, expected %06lx\n", x, y, pixel,
             expected);
     exit(EXIT_FAILURE);
+  }
+}
+
+static PROC Proc(const char* name) {
+  PROC proc = DrvGetProcAddress(name);
+  if (!proc) {
+    Fail(name);
+  }
+  return proc;
+}
+
+static void TestSwapInterval(const ProcTable* table, HDC hdc) {
+  const char* arb = ((ExtensionsArbFn)Proc("wglGetExtensionsStringARB"))(hdc);
+  const char* ext = ((ExtensionsExtFn)Proc("wglGetExtensionsStringEXT"))();
+  const char* gl =
+      (const char*)((GetStringFn)table->entries[kGlGetString])(GL_EXTENSIONS);
+  if (!arb || !strstr(arb, "WGL_EXT_swap_control") || strcmp(arb, ext) != 0 ||
+      !strstr(gl, "WGL_EXT_swap_control")) {
+    Fail("no WGL_EXT_swap_control");
+  }
+  SwapIntervalFn set = (SwapIntervalFn)Proc("wglSwapIntervalEXT");
+  GetSwapIntervalFn get = (GetSwapIntervalFn)Proc("wglGetSwapIntervalEXT");
+  if (get() != 1) {
+    Fail("swap interval does not default to 1");
+  }
+  if (set(-1) || GetLastError() != ERROR_INVALID_DATA || get() != 1) {
+    Fail("negative swap interval accepted");
+  }
+  if (!set(2) || get() != 2 || !set(0) || get() != 0) {
+    Fail("swap interval not stored");
   }
 }
 
@@ -212,6 +248,10 @@ int main(void) {
     Fail("CreateWindowA failed");
   }
   HDC hdc = GetDC(window);
+  if (((SwapIntervalFn)Proc("wglSwapIntervalEXT"))(1) ||
+      GetLastError() != ERROR_DC_NOT_FOUND) {
+    Fail("swap interval set without a context");
+  }
 
   PIXELFORMATDESCRIPTOR descriptor;
   if (!DrvValidateVersion(1) ||
@@ -224,6 +264,7 @@ int main(void) {
   if (!table || table->count != kGlEntryCount) {
     Fail("no context");
   }
+  TestSwapInterval(table, hdc);
 
   ((ClearColorFn)table->entries[kGlClearColor])(1.0f, 0.5f, 0.25f, 1.0f);
   ((ClearFn)table->entries[kGlClear])(GL_COLOR_BUFFER_BIT);

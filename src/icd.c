@@ -1,5 +1,6 @@
 #include "icd.h"
 
+#include <dwmapi.h>
 #include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -25,7 +26,8 @@ enum {
   kMaxLevels = 12,
   kMaxTextureSize = 1 << (kMaxLevels - 1),
   kClipPlanes = 6,
-  kMaxClipVertices = 3 + kClipPlanes
+  kMaxClipVertices = 3 + kClipPlanes,
+  kMaxSwapInterval = 8
 };
 
 enum { kRed, kGreen, kBlue, kAlpha, kS, kT, kFog, kVaryings };
@@ -35,6 +37,8 @@ static const float kIdentity[16] = {1, 0, 0, 0, 0, 1, 0, 0,
 static const float kRadiansPerDegree = 0.0174532925f;
 static const float kDepthUnit = 1.0f / 16777216.0f;
 static const float kIntegralFloat = 8388608.0f;
+static const char kWglExtensions[] =
+    "WGL_ARB_extensions_string WGL_EXT_extensions_string WGL_EXT_swap_control";
 
 typedef struct Vertex {
   float position[4];
@@ -130,6 +134,7 @@ typedef struct Context {
   GLenum texture_env_mode;
   int unpack_alignment;
   int pack_alignment;
+  int swap_interval;
 } Context;
 
 static Context contexts[kMaxContexts];
@@ -1594,7 +1599,7 @@ static const GLubyte* APIENTRY GetString(GLenum name) {
     case GL_VERSION:
       return (const GLubyte*)"1.1";
     case GL_EXTENSIONS:
-      return (const GLubyte*)"";
+      return (const GLubyte*)"WGL_EXT_swap_control";
     default:
       return NULL;
   }
@@ -1810,6 +1815,7 @@ ULONG APIENTRY DrvCreateContext(HDC hdc) {
           .texture_env_mode = GL_MODULATE,
           .unpack_alignment = 4,
           .pack_alignment = 4,
+          .swap_interval = 1,
       };
       memcpy(context->modelview[0], kIdentity, sizeof(kIdentity));
       memcpy(context->projection[0], kIdentity, sizeof(kIdentity));
@@ -1868,7 +1874,52 @@ BOOL APIENTRY DrvReleaseContext(ULONG handle) {
   return TRUE;
 }
 
-PROC APIENTRY DrvGetProcAddress(LPCSTR name) { return NULL; }
+static const char* WINAPI GetExtensionsStringARB(HDC hdc) {
+  if (!GetObjectType(hdc)) {
+    SetLastError(ERROR_DC_NOT_FOUND);
+    return NULL;
+  }
+  return kWglExtensions;
+}
+
+static const char* WINAPI GetExtensionsStringEXT(void) {
+  return kWglExtensions;
+}
+
+static BOOL WINAPI SwapIntervalEXT(int interval) {
+  if (!current) {
+    SetLastError(ERROR_DC_NOT_FOUND);
+    return FALSE;
+  }
+  if (interval < 0) {
+    SetLastError(ERROR_INVALID_DATA);
+    return FALSE;
+  }
+  current->swap_interval = MinInt(interval, kMaxSwapInterval);
+  return TRUE;
+}
+
+static int WINAPI GetSwapIntervalEXT(void) {
+  return current ? current->swap_interval : 0;
+}
+
+PROC APIENTRY DrvGetProcAddress(LPCSTR name) {
+  static const struct {
+    const char* name;
+    PROC proc;
+  } kProcs[] = {
+      {"wglGetExtensionsStringARB", (PROC)GetExtensionsStringARB},
+      {"wglGetExtensionsStringEXT", (PROC)GetExtensionsStringEXT},
+      {"wglSwapIntervalEXT", (PROC)SwapIntervalEXT},
+      {"wglGetSwapIntervalEXT", (PROC)GetSwapIntervalEXT},
+  };
+  for (size_t i = 0; name && i < sizeof(kProcs) / sizeof(kProcs[0]); i++) {
+    if (strcmp(name, kProcs[i].name) == 0) {
+      return kProcs[i].proc;
+    }
+  }
+  return NULL;
+}
 
 BOOL APIENTRY DrvSwapBuffers(HDC hdc) {
   Context* context = current;
@@ -1890,6 +1941,11 @@ BOOL APIENTRY DrvSwapBuffers(HDC hdc) {
     StretchDIBits(hdc, 0, 0, context->width, context->height, 0, 0,
                   context->width, context->height, context->pixels, &info,
                   DIB_RGB_COLORS, SRCCOPY);
+  }
+  for (int i = 0; i < context->swap_interval; i++) {
+    if (FAILED(DwmFlush())) {
+      break;
+    }
   }
   return Resize(context, hdc);
 }

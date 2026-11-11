@@ -14,6 +14,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(glfw)
 
 add_library(softgpu SHARED src/icd.c src/icd.def)
+target_link_libraries(softgpu PRIVATE dwmapi)
 set_target_properties(softgpu PROPERTIES PREFIX "")
 target_compile_options(softgpu
                        PRIVATE $<$<C_COMPILER_ID:MSVC>:/experimental:c11atomics>)

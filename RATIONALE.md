@@ -24,7 +24,7 @@ softgpu is a software OpenGL driver for Windows, in plain C. Its goal is to run 
 ## Build
 
 - **DLL name.** `PREFIX ""` keeps `softgpu.dll` on MinGW, which would add `lib`.
-- **System libraries.** CMake links `kernel32`, `user32` and `gdi32` by default on every toolchain, so no target lists them.
+- **System libraries.** CMake links `kernel32`, `user32` and `gdi32` by default on every toolchain, so softgpu only lists `dwmapi`.
 
 ## ICD
 
@@ -34,6 +34,7 @@ softgpu is a software OpenGL driver for Windows, in plain C. Its goal is to run 
 - **Handles.** `DHGLRC` is a 32-bit `ULONG`, so a context handle is its slot index plus one.
 - **Pixel format.** It must set `PFD_SUPPORT_COMPOSITION`, or `opengl32.dll` never calls `DrvCreateContext`. It has 24 depth and 8 stencil bits. `ChoosePixelFormat` skips a format without depth unless the app sets `PFD_DEPTH_DONTCARE`, and SDL2 skips one with fewer depth or stencil bits than the app asks for, so it picks Microsoft's GDI Generic renderer instead.
 - **Framebuffer.** A bottom-up 32-bit DIB, so rows are in GL order. `StretchDIBits` presents it.
+- **Swap interval.** `WGL_EXT_swap_control` comes through `DrvGetProcAddress`. Both extension string queries list it, since SDL2 only asks the ARB one, and `GL_EXTENSIONS` lists it too, as its spec allows for older games. GDI cannot flip on the refresh, so `DrvSwapBuffers` presents, then calls `DwmFlush` once per interval, which returns after DWM's next composition. Mesa's WGL sleeps on a timer instead, which drifts from the refresh.
 
 ## Rasterizer
 
@@ -74,7 +75,7 @@ softgpu is a software OpenGL driver for Windows, in plain C. Its goal is to run 
 
 | Option | Trigger |
 |---|---|
-| Framebuffer per window | An app draws into one window from two contexts, or swaps a DC that is not current. |
+| Framebuffer and swap interval per window | An app draws into one window from two contexts, or swaps a DC that is not current. |
 | Log file | A game that only starts through a launcher, so nobody can redirect its `stderr`. |
 | Hand-written SSE2 | After the plain-C speed steps, a profile still shows per-pixel math that the compiler did not vectorize. |
 | 32-bit edge stepping | A profile shows edge stepping, a small share of the time today. Step in 32-bit inside tiles after 64-bit setup. |
