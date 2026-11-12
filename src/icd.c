@@ -4941,6 +4941,10 @@ static bool* Capability(State* state, GLenum cap) {
 
 static void SetCapability(Op op, GLenum cap, bool value) {
   Context* context = current;
+  if (ArrayIndex(cap) >= 0) {
+    SetClientState(cap, value);
+    return;
+  }
   if (Record(context, op, (Arg[]){{.u = cap}}, 1) || InsideBeginEnd(context)) {
     return;
   }

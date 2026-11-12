@@ -378,7 +378,7 @@ static void TestVertexArrays(int width, int height) {
   gl.VertexPointer(2, GL_FLOAT, 0, kVertices);
   gl.ColorPointer(4, GL_UNSIGNED_BYTE, 0, kColors);
   gl.EnableClientState(GL_VERTEX_ARRAY);
-  gl.EnableClientState(GL_COLOR_ARRAY);
+  gl.Enable(GL_COLOR_ARRAY);
   gl.DrawArrays(GL_QUADS, 0, 4);
   ExpectColor(45, 5, RGB(255, 255, 0));
   gl.Clear(GL_COLOR_BUFFER_BIT);
@@ -386,7 +386,8 @@ static void TestVertexArrays(int width, int height) {
   ExpectColor(48, 2, RGB(255, 255, 0));
   ExpectColor(42, 8, kBlack);
   gl.DisableClientState(GL_VERTEX_ARRAY);
-  gl.DisableClientState(GL_COLOR_ARRAY);
+  gl.Disable(GL_COLOR_ARRAY);
+  Expect(!gl.IsEnabled(GL_COLOR_ARRAY), "array enable through glDisable");
   gl.ShadeModel(GL_FLAT);
   gl.Begin(GL_QUAD_STRIP);
   gl.Color3f(1.0f, 0.0f, 0.0f);
