@@ -791,7 +791,7 @@ static GLint ColorToInt(double value) {
 }
 
 static uint32_t PackChannel(GLclampf value) {
-  return (uint32_t)(Clamp01(value) * 255.0f + 0.5f);
+  return (uint32_t)(int32_t)(Clamp01(value) * 255.0f + 0.5f);
 }
 
 static uint32_t PackColor(const float color[4]) {

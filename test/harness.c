@@ -631,6 +631,12 @@ static void TestFragmentOps(int width, int height) {
   gl.Disable(GL_FOG);
   ExpectNear(25, 5, 128, 1);
   ExpectNear(50, 5, 255, 16);
+  gl.Disable(GL_DITHER);
+  gl.ClearColor(0.5f, 0.0f, 0.0f, 1.0f);
+  gl.Clear(GL_COLOR_BUFFER_BIT);
+  gl.Enable(GL_DITHER);
+  ExpectColor(5, 5, RGB(128, 0, 0));
+  gl.ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   ExpectError(GL_NO_ERROR, "fragment operations");
 }
 
