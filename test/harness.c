@@ -482,6 +482,54 @@ static void TestLinesAndPoints(int width, int height) {
   ExpectError(GL_NO_ERROR, "lines and points");
 }
 
+static void TestRasterRules(int width, int height) {
+  PixelSpace(width, height);
+  gl.Enable(GL_BLEND);
+  gl.BlendFunc(GL_ONE, GL_ONE);
+  gl.Color3f(0.25f, 0.0f, 0.0f);
+  gl.Begin(GL_TRIANGLES);
+  gl.Vertex2f(0.0f, 0.0f);
+  gl.Vertex2f(16.0f, 0.0f);
+  gl.Vertex2f(16.0f, 16.0f);
+  gl.Vertex2f(0.0f, 0.0f);
+  gl.Vertex2f(16.0f, 16.0f);
+  gl.Vertex2f(0.0f, 16.0f);
+  gl.End();
+  gl.Disable(GL_BLEND);
+  ExpectColor(5, 5, RGB(64, 0, 0));
+  ExpectColor(10, 3, RGB(64, 0, 0));
+  ExpectColor(3, 10, RGB(64, 0, 0));
+
+  gl.Color3f(1.0f, 1.0f, 1.0f);
+  gl.Begin(GL_LINES);
+  gl.Vertex2f(20.52f, 40.5f);
+  gl.Vertex2f(30.0f, 40.5f);
+  gl.End();
+  ExpectColor(20, 40, kWhite);
+
+  gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  gl.Enable(GL_DEPTH_TEST);
+  gl.DepthFunc(GL_LEQUAL);
+  gl.Translatef(0.375f, 0.375f, 0.0f);
+  gl.PolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+  gl.Rectf(1.0f, 1.0f, 158.0f, 158.0f);
+  gl.PolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+  gl.Enable(GL_POLYGON_OFFSET_FILL);
+  gl.PolygonOffset(1.0f, 1.0f);
+  gl.Color3f(0.0f, 0.0f, 1.0f);
+  gl.Rectf(0.0f, 0.0f, 160.0f, 160.0f);
+  gl.Disable(GL_POLYGON_OFFSET_FILL);
+  gl.Disable(GL_DEPTH_TEST);
+  gl.DepthFunc(GL_LESS);
+  gl.LoadIdentity();
+  gl.Color3f(1.0f, 1.0f, 1.0f);
+  for (int y = 2; y < 158; y++) {
+    ExpectColor(1, y, kWhite);
+  }
+  ExpectColor(80, 80, RGB(0, 0, 255));
+  ExpectError(GL_NO_ERROR, "raster rules");
+}
+
 static void TestFeedbackAndSelection(void) {
   GLfloat feedback[16];
   gl.FeedbackBuffer(16, GL_3D, feedback);
@@ -780,6 +828,7 @@ int main(void) {
   TestLighting(rect.right, rect.bottom);
   TestTexgen(rect.right, rect.bottom);
   TestLinesAndPoints(rect.right, rect.bottom);
+  TestRasterRules(rect.right, rect.bottom);
   TestFeedbackAndSelection();
   TestPixels(rect.right, rect.bottom);
   TestAccum(rect.right, rect.bottom);
