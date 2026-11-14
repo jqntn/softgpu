@@ -18,6 +18,7 @@ For 32-bit apps, also build x86 in `build-x86`.
 ## Run
 
 - `build\harness` tests the driver directly.
+- `build\bench` times the driver without showing a window.
 - `build\wgltest` tests it through `opengl32.dll` once installed.
 - `build\triangle` draws a triangle with GLFW.
 

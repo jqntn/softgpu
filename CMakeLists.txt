@@ -23,12 +23,16 @@ add_executable(harness test/harness.c)
 target_include_directories(harness PRIVATE src)
 target_link_libraries(harness PRIVATE softgpu)
 
+add_executable(bench test/bench.c)
+target_include_directories(bench PRIVATE src)
+target_link_libraries(bench PRIVATE softgpu)
+
 add_executable(wgltest test/wgltest.c)
 target_link_libraries(wgltest PRIVATE opengl32)
 
 add_executable(triangle samples/triangle.c)
 target_link_libraries(triangle PRIVATE glfw opengl32)
 
-set_target_properties(softgpu harness wgltest triangle
+set_target_properties(softgpu harness bench wgltest triangle
                       PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON
                                  C_EXTENSIONS OFF)
