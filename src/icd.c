@@ -30,6 +30,7 @@ enum {
   kTextureDepth = 2,
   kMaxLevels = 12,
   kMaxTextureSize = 1 << (kMaxLevels - 1),
+  kTextureUnits = 2,
   kMaxLights = 8,
   kMaxClipPlanes = 6,
   kClipPlanes = 6 + kMaxClipPlanes,
@@ -47,22 +48,37 @@ enum {
   kMaxSwapInterval = 8
 };
 
-enum { kRed, kGreen, kBlue, kAlpha, kS, kT, kQ, kFog, kVaryings };
+enum {
+  kRed,
+  kGreen,
+  kBlue,
+  kAlpha,
+  kFog,
+  kTexcoords,
+  kVaryings = kTexcoords + 3 * kTextureUnits
+};
+
+enum { kS, kT, kQ };
 
 enum { kFront, kBack };
 
 enum { kTexture1D, kTexture2D };
 
-enum { kModelview, kProjection, kTextureMatrix, kMatrixStacks };
+enum {
+  kModelview,
+  kProjection,
+  kTextureMatrix,
+  kMatrixStacks = kTextureMatrix + kTextureUnits
+};
 
 enum {
   kVertexArray,
   kNormalArray,
   kColorArray,
   kIndexArray,
-  kTexCoordArray,
   kEdgeFlagArray,
-  kArrays
+  kTexCoordArray,
+  kArrays = kTexCoordArray + kTextureUnits
 };
 
 typedef enum Op {
@@ -121,6 +137,7 @@ typedef enum Op {
   kOpCopyTexSubImage2D,
   kOpBindTexture,
   kOpPrioritizeTextures,
+  kOpActiveTexture,
   kOpScissor,
   kOpAlphaFunc,
   kOpStencilFunc,
@@ -234,12 +251,6 @@ static const GLenum kCapabilities[] = {
     GL_POLYGON_STIPPLE,
     GL_SCISSOR_TEST,
     GL_STENCIL_TEST,
-    GL_TEXTURE_1D,
-    GL_TEXTURE_2D,
-    GL_TEXTURE_GEN_Q,
-    GL_TEXTURE_GEN_R,
-    GL_TEXTURE_GEN_S,
-    GL_TEXTURE_GEN_T,
 };
 
 typedef union Arg {
@@ -320,7 +331,7 @@ typedef struct Vertex {
   float clip[4];
   float eye[4];
   float color[2][4];
-  float texcoord[4];
+  float texcoord[kTextureUnits][4];
   float fog;
   bool edge;
 } Vertex;
@@ -339,14 +350,14 @@ typedef struct RasterPosition {
   bool valid;
   float color[4];
   float index;
-  float texcoord[4];
+  float texcoord[kTextureUnits][4];
 } RasterPosition;
 
 typedef struct CurrentState {
   float color[4];
   float index;
   float normal[3];
-  float texcoord[4];
+  float texcoord[kTextureUnits][4];
   bool edge_flag;
   RasterPosition raster;
 } CurrentState;
@@ -509,12 +520,26 @@ typedef struct TexGen {
   float eye[4];
 } TexGen;
 
-typedef struct TextureState {
+typedef struct Combiner {
+  GLenum function;
+  GLenum source[3];
+  GLenum operand[3];
+  float scale;
+} Combiner;
+
+typedef struct TextureUnit {
   bool enabled[2];
   GLuint binding[2];
   GLenum env_mode;
   float env_color[4];
+  Combiner rgb;
+  Combiner alpha;
   TexGen gen[4];
+} TextureUnit;
+
+typedef struct TextureState {
+  int active;
+  TextureUnit units[kTextureUnits];
 } TextureState;
 
 typedef struct ScissorState {
@@ -565,12 +590,13 @@ typedef struct ClientState {
   PixelStore pack;
   PixelStore unpack;
   Array arrays[kArrays];
+  int active_texture;
 } ClientState;
 
 typedef struct AttribEntry {
   GLbitfield mask;
   State state;
-  TextureParameters textures[2];
+  TextureParameters textures[kTextureUnits][2];
 } AttribEntry;
 
 typedef struct ClientEntry {
@@ -619,7 +645,7 @@ typedef struct Context {
   float normal_matrix[9];
   bool normal_matrix_stale;
   Texture default_textures[2];
-  Texture* bound[2];
+  Texture* bound[kTextureUnits][2];
   Level proxies[2][kMaxLevels];
   PixelMap pixel_maps[kPixelMaps];
   Map maps1[kMaps];
@@ -665,7 +691,8 @@ typedef struct Targets {
 } Targets;
 
 typedef struct Primitive {
-  Sampler sampler;
+  Sampler samplers[kTextureUnits];
+  int varyings;
   Targets targets;
   int rect[4];
   float offset;
@@ -675,9 +702,15 @@ typedef struct Primitive {
 typedef struct Setup {
   const Primitive* primitive;
   const Corner* corners[3];
-  bool projective;
-  float derivative[2][3];
+  bool projective[kTextureUnits];
+  float derivative[kTextureUnits][2][3];
 } Setup;
+
+typedef struct TextureLookup {
+  float s;
+  float t;
+  float lambda;
+} TextureLookup;
 
 static Context contexts[kMaxContexts];
 static atomic_int used[kMaxContexts];
@@ -747,6 +780,13 @@ static int MaxInt(int a, int b) { return a > b ? a : b; }
 static bool IsPowerOfTwo(int value) {
   return value > 0 && (value & (value - 1)) == 0;
 }
+
+static bool IsTextureUnit(GLenum texture) {
+  return texture >= GL_TEXTURE0_ARB &&
+         texture < GL_TEXTURE0_ARB + kTextureUnits;
+}
+
+static int TexcoordVarying(int unit) { return kTexcoords + 3 * unit; }
 
 static float Dot3(const float a[3], const float b[3]) {
   return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -850,6 +890,14 @@ static bool InsideBeginEnd(Context* context) {
     SetError(context, GL_INVALID_OPERATION);
   }
   return context->inside;
+}
+
+static TextureUnit* ActiveUnit(Context* context) {
+  return &context->state.texture.units[context->state.texture.active];
+}
+
+static Texture* BoundTexture(const Context* context, int target) {
+  return context->bound[context->state.texture.active][target];
 }
 
 static int NamePosition(const Names* names, GLuint name) {
@@ -1122,13 +1170,14 @@ static float TextureScale(const Sampler* sampler, int axis) {
   return sampler->one_dimensional ? 0.0f : (float)LevelHeight(base, false);
 }
 
-static float Lambda(const Setup* setup, float s, float t, float inverse_q) {
-  const Sampler* sampler = &setup->primitive->sampler;
+static float Lambda(const Setup* setup, int unit, float s, float t,
+                    float inverse_q) {
+  const Sampler* sampler = &setup->primitive->samplers[unit];
   float width = TextureScale(sampler, 0);
   float height = TextureScale(sampler, 1);
   float rho = 0.0f;
   for (int axis = 0; axis < 2; axis++) {
-    const float* d = setup->derivative[axis];
+    const float* d = setup->derivative[unit][axis];
     float du = (d[0] - s * d[2]) * inverse_q * width;
     float dv = (d[1] - t * d[2]) * inverse_q * height;
     rho = MaxFloat(du * du + dv * dv, rho);
@@ -1136,13 +1185,63 @@ static float Lambda(const Setup* setup, float s, float t, float inverse_q) {
   return 0.5f * log2f(rho);
 }
 
-static void ApplyTexture(const Context* context, GLenum format,
-                         const float texel[4], float color[4]) {
-  const TextureState* state = &context->state.texture;
+static float CombineArgument(GLenum source, GLenum operand, int channel,
+                             const TextureUnit* unit, const float texel[4],
+                             const float primary[4], const float previous[4]) {
+  const float* color = source == GL_TEXTURE             ? texel
+                       : source == GL_CONSTANT_ARB      ? unit->env_color
+                       : source == GL_PRIMARY_COLOR_ARB ? primary
+                                                        : previous;
+  bool alpha = operand == GL_SRC_ALPHA || operand == GL_ONE_MINUS_SRC_ALPHA;
+  float value = color[alpha ? kAlpha : channel];
+  bool inverted =
+      operand == GL_ONE_MINUS_SRC_COLOR || operand == GL_ONE_MINUS_SRC_ALPHA;
+  return inverted ? 1.0f - value : value;
+}
+
+static float CombineFunction(GLenum function, const float a[3]) {
+  switch (function) {
+    case GL_REPLACE:
+      return a[0];
+    case GL_MODULATE:
+      return a[0] * a[1];
+    case GL_ADD:
+      return a[0] + a[1];
+    case GL_ADD_SIGNED_ARB:
+      return a[0] + a[1] - 0.5f;
+    case GL_INTERPOLATE_ARB:
+      return a[0] * a[2] + a[1] * (1.0f - a[2]);
+    default:
+      return a[0] - a[1];
+  }
+}
+
+static void ApplyCombine(const TextureUnit* unit, const float texel[4],
+                         const float primary[4], float color[4]) {
+  float previous[4];
+  memcpy(previous, color, sizeof(previous));
+  for (int channel = 0; channel < 4; channel++) {
+    const Combiner* combiner = channel == kAlpha ? &unit->alpha : &unit->rgb;
+    float a[3];
+    for (int i = 0; i < 3; i++) {
+      a[i] = CombineArgument(combiner->source[i], combiner->operand[i], channel,
+                             unit, texel, primary, previous);
+    }
+    color[channel] =
+        Clamp01(CombineFunction(combiner->function, a) * combiner->scale);
+  }
+}
+
+static void ApplyTexture(const TextureUnit* state, GLenum format,
+                         const float texel[4], const float primary[4],
+                         float color[4]) {
   bool has_color = format != GL_ALPHA;
   bool has_alpha = format == GL_ALPHA || format == GL_LUMINANCE_ALPHA ||
                    format == GL_INTENSITY || format == GL_RGBA;
   switch (state->env_mode) {
+    case GL_COMBINE_ARB:
+      ApplyCombine(state, texel, primary, color);
+      break;
     case GL_REPLACE:
       for (int i = 0; i < 3 && has_color; i++) {
         color[i] = texel[i];
@@ -1164,6 +1263,16 @@ static void ApplyTexture(const Context* context, GLenum format,
         color[i] = format == GL_RGBA
                        ? color[i] + (texel[i] - color[i]) * texel[3]
                        : texel[i];
+      }
+      break;
+    case GL_ADD:
+      for (int i = 0; i < 3 && has_color; i++) {
+        color[i] = MinFloat(color[i] + texel[i], 1.0f);
+      }
+      if (format == GL_INTENSITY) {
+        color[3] = MinFloat(color[3] + texel[3], 1.0f);
+      } else if (has_alpha) {
+        color[3] *= texel[3];
       }
       break;
     default:
@@ -1364,16 +1473,22 @@ static void WriteFragment(Context* context, const Primitive* primitive,
 }
 
 static void ShadeColor(const Context* context, const Primitive* primitive,
-                       float s, float t, float lambda, float fog,
+                       const float values[kVaryings],
+                       const TextureLookup lookups[kTextureUnits],
                        float coverage, float color[4]) {
-  const Sampler* sampler = &primitive->sampler;
-  if (sampler->texture) {
-    float texel[4];
-    SampleTexture(sampler, s, t, lambda, texel);
-    ApplyTexture(context, sampler->format, texel, color);
+  memcpy(color, values, 4 * sizeof(float));
+  for (int unit = 0; unit < kTextureUnits; unit++) {
+    const Sampler* sampler = &primitive->samplers[unit];
+    if (sampler->texture) {
+      const TextureLookup* lookup = &lookups[unit];
+      float texel[4];
+      SampleTexture(sampler, lookup->s, lookup->t, lookup->lambda, texel);
+      ApplyTexture(&context->state.texture.units[unit], sampler->format, texel,
+                   values, color);
+    }
   }
   if (context->state.fog.enabled) {
-    ApplyFog(context, fog, color);
+    ApplyFog(context, values[kFog], color);
   }
   for (int i = 0; i < 4; i++) {
     color[i] = Clamp01(color[i]);
@@ -1383,7 +1498,7 @@ static void ShadeColor(const Context* context, const Primitive* primitive,
 
 static void EmitFragment(Context* context, const Primitive* primitive, int x,
                          int y, float z, const float values[kVaryings],
-                         float lambda, float coverage) {
+                         const float* lambda, float coverage) {
   const int* rect = primitive->rect;
   if (x < rect[0] || y < rect[1] || x >= rect[2] || y >= rect[3]) {
     return;
@@ -1394,10 +1509,17 @@ static void EmitFragment(Context* context, const Primitive* primitive, int x,
   if (!depth_pass && !context->state.stencil.test) {
     return;
   }
-  float color[4] = {values[kRed], values[kGreen], values[kBlue],
-                    values[kAlpha]};
-  ShadeColor(context, primitive, values[kS] / values[kQ],
-             values[kT] / values[kQ], lambda, values[kFog], coverage, color);
+  TextureLookup lookups[kTextureUnits] = {{0}};
+  for (int unit = 0; unit < kTextureUnits; unit++) {
+    const float* coord = &values[TexcoordVarying(unit)];
+    if (primitive->samplers[unit].texture) {
+      lookups[unit] =
+          (TextureLookup){coord[kS] / coord[kQ], coord[kT] / coord[kQ],
+                          lambda ? lambda[unit] : 0.0f};
+    }
+  }
+  float color[4];
+  ShadeColor(context, primitive, values, lookups, coverage, color);
   WriteFragment(context, primitive, index, z, depth_pass, color);
 }
 
@@ -1414,30 +1536,35 @@ static void Shade(Context* context, const Setup* setup, size_t index,
   float w =
       1.0f / (weight[0] * v[0]->q + weight[1] * v[1]->q + weight[2] * v[2]->q);
   float varying[kVaryings];
-  for (int i = 0; i < kVaryings; i++) {
+  for (int i = 0; i < primitive->varyings; i++) {
     varying[i] = (weight[0] * v[0]->varying[i] + weight[1] * v[1]->varying[i] +
                   weight[2] * v[2]->varying[i]) *
                  w;
   }
-  float s = varying[kS];
-  float t = varying[kT];
-  float lambda = 0.0f;
-  const Sampler* sampler = &primitive->sampler;
-  if (sampler->texture) {
+  TextureLookup lookups[kTextureUnits] = {{0}};
+  for (int unit = 0; unit < kTextureUnits; unit++) {
+    const Texture* texture = primitive->samplers[unit].texture;
+    if (!texture) {
+      continue;
+    }
+    const float* coord = &varying[TexcoordVarying(unit)];
+    float s = coord[kS];
+    float t = coord[kT];
     float inverse_q = w;
-    if (setup->projective) {
-      s /= varying[kQ];
-      t /= varying[kQ];
-      inverse_q = w / varying[kQ];
+    if (setup->projective[unit]) {
+      s /= coord[kQ];
+      t /= coord[kQ];
+      inverse_q = w / coord[kQ];
     }
-    const TextureParameters* parameters = &sampler->texture->parameters;
-    if (parameters->min_filter != parameters->mag_filter) {
-      lambda = Lambda(setup, s, t, inverse_q);
-    }
+    const TextureParameters* parameters = &texture->parameters;
+    float lambda = parameters->min_filter != parameters->mag_filter
+                       ? Lambda(setup, unit, s, t, inverse_q)
+                       : 0.0f;
+    lookups[unit] = (TextureLookup){s, t, lambda};
   }
-  ShadeColor(context, primitive, s, t, lambda, varying[kFog], coverage,
-             varying);
-  WriteFragment(context, primitive, index, z, depth_pass, varying);
+  float color[4];
+  ShadeColor(context, primitive, varying, lookups, coverage, color);
+  WriteFragment(context, primitive, index, z, depth_pass, color);
 }
 
 static bool StippleBit(const Context* context, int x, int y) {
@@ -1447,17 +1574,20 @@ static bool StippleBit(const Context* context, int x, int y) {
 static void PrepareSetup(Setup* setup, const Primitive* primitive,
                          const Corner* const v[3], const float gradient[2][3]) {
   *setup = (Setup){.primitive = primitive, .corners = {v[0], v[1], v[2]}};
-  if (!primitive->sampler.texture) {
-    return;
-  }
-  for (int k = 0; k < 3; k++) {
-    setup->projective = setup->projective || v[k]->varying[kQ] != v[k]->q;
-  }
-  for (int axis = 0; axis < 2; axis++) {
+  for (int unit = 0; unit < kTextureUnits; unit++) {
+    if (!primitive->samplers[unit].texture) {
+      continue;
+    }
+    int base = TexcoordVarying(unit);
     for (int k = 0; k < 3; k++) {
-      setup->derivative[axis][0] += gradient[axis][k] * v[k]->varying[kS];
-      setup->derivative[axis][1] += gradient[axis][k] * v[k]->varying[kT];
-      setup->derivative[axis][2] += gradient[axis][k] * v[k]->varying[kQ];
+      setup->projective[unit] =
+          setup->projective[unit] || v[k]->varying[base + kQ] != v[k]->q;
+      for (int axis = 0; axis < 2; axis++) {
+        for (int c = kS; c <= kQ; c++) {
+          setup->derivative[unit][axis][c] +=
+              gradient[axis][k] * v[k]->varying[base + c];
+        }
+      }
     }
   }
 }
@@ -1657,20 +1787,24 @@ static void LineValues(const Corner* a, const Corner* b, float t,
   }
 }
 
-static float LineLambda(const Primitive* primitive, const Corner* a,
+static float LineLambda(const Primitive* primitive, int unit, const Corner* a,
                         const Corner* b, float t, const float values[kVaryings],
                         float length) {
-  const Sampler* sampler = &primitive->sampler;
+  const Sampler* sampler = &primitive->samplers[unit];
   const TextureParameters* parameters = &sampler->texture->parameters;
   if (parameters->min_filter == parameters->mag_filter || length <= 0.0f) {
     return 0.0f;
   }
-  float q = (1.0f - t) * a->varying[kQ] + t * b->varying[kQ];
-  float dq = b->varying[kQ] - a->varying[kQ];
-  float s = values[kS] / values[kQ];
-  float tt = values[kT] / values[kQ];
-  float ds = (b->varying[kS] - a->varying[kS] - s * dq) / q;
-  float dt = (b->varying[kT] - a->varying[kT] - tt * dq) / q;
+  int base = TexcoordVarying(unit);
+  const float* from = &a->varying[base];
+  const float* to = &b->varying[base];
+  const float* coord = &values[base];
+  float q = (1.0f - t) * from[kQ] + t * to[kQ];
+  float dq = to[kQ] - from[kQ];
+  float s = coord[kS] / coord[kQ];
+  float tt = coord[kT] / coord[kQ];
+  float ds = (to[kS] - from[kS] - s * dq) / q;
+  float dt = (to[kT] - from[kT] - tt * dq) / q;
   float du = ds * TextureScale(sampler, 0) / length;
   float dv = dt * TextureScale(sampler, 1) / length;
   return 0.5f * log2f(du * du + dv * dv);
@@ -1687,9 +1821,12 @@ static void LineFragment(Context* context, const Primitive* primitive,
                          int y, float coverage, float length) {
   float values[kVaryings];
   LineValues(a, b, t, values);
-  float lambda = primitive->sampler.texture
-                     ? LineLambda(primitive, a, b, t, values, length)
-                     : 0.0f;
+  float lambda[kTextureUnits] = {0};
+  for (int unit = 0; unit < kTextureUnits; unit++) {
+    if (primitive->samplers[unit].texture) {
+      lambda[unit] = LineLambda(primitive, unit, a, b, t, values, length);
+    }
+  }
   float z = a->z + t * (b->z - a->z) + primitive->offset;
   EmitFragment(context, primitive, x, y, z, values, lambda, coverage);
 }
@@ -1821,7 +1958,7 @@ static void RasterizePoint(Context* context, const Primitive* primitive,
           }
         }
         if (inside > 0) {
-          EmitFragment(context, primitive, x, y, z, values, 0.0f,
+          EmitFragment(context, primitive, x, y, z, values, NULL,
                        (float)inside / (float)(kSamples * kSamples));
         }
       }
@@ -1837,18 +1974,25 @@ static void RasterizePoint(Context* context, const Primitive* primitive,
   int y0 = (int)Floor(center_y - (float)width * 0.5f);
   for (int y = y0; y < y0 + width; y++) {
     for (int x = x0; x < x0 + width; x++) {
-      EmitFragment(context, primitive, x, y, z, values, 0.0f, 1.0f);
+      EmitFragment(context, primitive, x, y, z, values, NULL, 1.0f);
     }
   }
 }
 
+static int MatrixStack(const Context* context) {
+  switch (context->state.transform.matrix_mode) {
+    case GL_PROJECTION:
+      return kProjection;
+    case GL_TEXTURE:
+      return kTextureMatrix + context->state.texture.active;
+    default:
+      return kModelview;
+  }
+}
+
 static float* CurrentMatrix(Context* context) {
-  int stack = kModelview;
-  if (context->state.transform.matrix_mode == GL_PROJECTION) {
-    stack = kProjection;
-  } else if (context->state.transform.matrix_mode == GL_TEXTURE) {
-    stack = kTextureMatrix;
-  } else {
+  int stack = MatrixStack(context);
+  if (stack == kModelview) {
     context->normal_matrix_stale = true;
   }
   return context->matrices[stack][context->matrix_top[stack]];
@@ -2078,14 +2222,17 @@ static void LightFace(const Context* context, int face, const float eye[4],
   out[3] = diffuse[3];
 }
 
-static void GenerateTexcoords(const Context* context, const float object[4],
+static bool SphereMap(const TexGen gen[4]) {
+  return (gen[0].enabled && gen[0].mode == GL_SPHERE_MAP) ||
+         (gen[1].enabled && gen[1].mode == GL_SPHERE_MAP);
+}
+
+static void GenerateTexcoords(const TexGen gen[4], const float object[4],
                               const float eye[4], const float normal[3],
                               float texcoord[4]) {
   float reflection[3] = {0};
   float m = 1.0f;
-  const TexGen* gen = context->state.texture.gen;
-  if ((gen[0].enabled && gen[0].mode == GL_SPHERE_MAP) ||
-      (gen[1].enabled && gen[1].mode == GL_SPHERE_MAP)) {
+  if (SphereMap(gen)) {
     float u[3] = {eye[0], eye[1], eye[2]};
     Normalize3(u);
     float d = Dot3(normal, u);
@@ -2115,13 +2262,15 @@ static void GenerateTexcoords(const Context* context, const float object[4],
 
 static void ProcessVertex(Context* context, const float object[4],
                           const float color[4], const float normal[3],
-                          const float texcoord[4], Vertex* vertex) {
+                          const float texcoords[kTextureUnits][4],
+                          Vertex* vertex) {
   Transform(TopMatrix(context, kModelview), object, vertex->eye);
   Transform(TopMatrix(context, kProjection), vertex->eye, vertex->clip);
   const State* state = &context->state;
-  const TexGen* gen = state->texture.gen;
-  bool sphere = (gen[0].enabled && gen[0].mode == GL_SPHERE_MAP) ||
-                (gen[1].enabled && gen[1].mode == GL_SPHERE_MAP);
+  bool sphere = false;
+  for (int unit = 0; unit < kTextureUnits; unit++) {
+    sphere = sphere || SphereMap(state->texture.units[unit].gen);
+  }
   float eye_normal[3] = {0};
   if (state->lighting.enabled || sphere) {
     EyeNormal(context, normal, eye_normal);
@@ -2144,11 +2293,16 @@ static void ProcessVertex(Context* context, const float object[4],
       vertex->color[face][i] = Clamp01(vertex->color[face][i]);
     }
   }
-  float generated[4] = {texcoord[0], texcoord[1], texcoord[2], texcoord[3]};
-  if (gen[0].enabled || gen[1].enabled || gen[2].enabled || gen[3].enabled) {
-    GenerateTexcoords(context, object, vertex->eye, eye_normal, generated);
+  for (int unit = 0; unit < kTextureUnits; unit++) {
+    const TexGen* gen = state->texture.units[unit].gen;
+    float generated[4];
+    memcpy(generated, texcoords[unit], sizeof(generated));
+    if (gen[0].enabled || gen[1].enabled || gen[2].enabled || gen[3].enabled) {
+      GenerateTexcoords(gen, object, vertex->eye, eye_normal, generated);
+    }
+    Transform(TopMatrix(context, kTextureMatrix + unit), generated,
+              vertex->texcoord[unit]);
   }
-  Transform(TopMatrix(context, kTextureMatrix), generated, vertex->texcoord);
   vertex->fog = vertex->eye[2];
   vertex->edge = state->current.edge_flag;
 }
@@ -2181,7 +2335,10 @@ static void Interpolate(const Vertex* p, const Vertex* q, float t,
     result.eye[i] += (q->eye[i] - p->eye[i]) * t;
     result.color[kFront][i] += (q->color[kFront][i] - p->color[kFront][i]) * t;
     result.color[kBack][i] += (q->color[kBack][i] - p->color[kBack][i]) * t;
-    result.texcoord[i] += (q->texcoord[i] - p->texcoord[i]) * t;
+    for (int unit = 0; unit < kTextureUnits; unit++) {
+      result.texcoord[unit][i] +=
+          (q->texcoord[unit][i] - p->texcoord[unit][i]) * t;
+    }
   }
   result.fog += (q->fog - p->fog) * t;
   *out = result;
@@ -2282,10 +2439,13 @@ static void ToCorner(const Context* context, const Vertex* vertex, int face,
   for (int i = 0; i < 4; i++) {
     corner->varying[i] = vertex->color[face][i] * q;
   }
-  corner->varying[kS] = vertex->texcoord[0] * q;
-  corner->varying[kT] = vertex->texcoord[1] * q;
-  corner->varying[kQ] = vertex->texcoord[3] * q;
   corner->varying[kFog] = vertex->fog * q;
+  for (int unit = 0; unit < kTextureUnits; unit++) {
+    float* coord = &corner->varying[TexcoordVarying(unit)];
+    coord[kS] = vertex->texcoord[unit][0] * q;
+    coord[kT] = vertex->texcoord[unit][1] * q;
+    coord[kQ] = vertex->texcoord[unit][3] * q;
+  }
 }
 
 static void SelectHit(Context* context, float z) {
@@ -2353,7 +2513,7 @@ static void FeedbackCorner(Context* context, const Vertex* vertex,
   FeedbackVertex(
       context,
       (const float[4]){corner->x, corner->y, corner->z, vertex->clip[3]},
-      vertex->color[face], vertex->texcoord);
+      vertex->color[face], vertex->texcoord[0]);
 }
 
 static void SelectTargets(Context* context, Targets* targets) {
@@ -2387,14 +2547,14 @@ static void DrawableRect(const Context* context, int rect[4]) {
   }
 }
 
-static void PrepareSampler(const Context* context, Sampler* sampler) {
+static void PrepareSampler(const Context* context, int unit, Sampler* sampler) {
   *sampler = (Sampler){0};
-  const TextureState* state = &context->state.texture;
+  const TextureUnit* state = &context->state.texture.units[unit];
   int target = state->enabled[kTexture2D] ? kTexture2D : kTexture1D;
   if (!state->enabled[target]) {
     return;
   }
-  const Texture* texture = context->bound[target];
+  const Texture* texture = context->bound[unit][target];
   bool one_dimensional = target == kTexture1D;
   int levels = CompleteLevels(texture, one_dimensional);
   if (levels == 0) {
@@ -2412,8 +2572,13 @@ static void PrepareSampler(const Context* context, Sampler* sampler) {
 }
 
 static void PreparePrimitive(Context* context, Primitive* primitive) {
-  *primitive = (Primitive){0};
-  PrepareSampler(context, &primitive->sampler);
+  *primitive = (Primitive){.varyings = kTexcoords};
+  for (int unit = 0; unit < kTextureUnits; unit++) {
+    PrepareSampler(context, unit, &primitive->samplers[unit]);
+    if (primitive->samplers[unit].texture) {
+      primitive->varyings = TexcoordVarying(unit + 1);
+    }
+  }
   SelectTargets(context, &primitive->targets);
   DrawableRect(context, primitive->rect);
 }
@@ -2739,12 +2904,12 @@ static void EndPrimitive(Context* context) {
 
 static void EmitVertex(Context* context, const float object[4],
                        const float color[4], const float normal[3],
-                       const float texcoord[4]) {
+                       const float texcoords[kTextureUnits][4]) {
   if (!context->inside) {
     return;
   }
   Vertex vertex;
-  ProcessVertex(context, object, color, normal, texcoord, &vertex);
+  ProcessVertex(context, object, color, normal, texcoords, &vertex);
   Assemble(context, &vertex);
 }
 
@@ -3068,17 +3233,27 @@ static void APIENTRY Normal3s(GLshort nx, GLshort ny, GLshort nz) {
 
 static void APIENTRY Normal3sv(const GLshort* v) { Normal3s(v[0], v[1], v[2]); }
 
-static void APIENTRY TexCoord4f(GLfloat s, GLfloat t, GLfloat r, GLfloat q) {
+static void APIENTRY MultiTexCoord4fARB(GLenum texture, GLfloat s, GLfloat t,
+                                        GLfloat r, GLfloat q) {
   Context* context = current;
   if (Record(context, kOpTexCoord,
-             (Arg[]){{.f = s}, {.f = t}, {.f = r}, {.f = q}}, 4)) {
+             (Arg[]){{.u = texture}, {.f = s}, {.f = t}, {.f = r}, {.f = q}},
+             5)) {
     return;
   }
-  float* texcoord = context->state.current.texcoord;
+  if (!IsTextureUnit(texture)) {
+    SetError(context, GL_INVALID_ENUM);
+    return;
+  }
+  float* texcoord = context->state.current.texcoord[texture - GL_TEXTURE0_ARB];
   texcoord[0] = s;
   texcoord[1] = t;
   texcoord[2] = r;
   texcoord[3] = q;
+}
+
+static void APIENTRY TexCoord4f(GLfloat s, GLfloat t, GLfloat r, GLfloat q) {
+  MultiTexCoord4fARB(GL_TEXTURE0_ARB, s, t, r, q);
 }
 
 static void APIENTRY TexCoord1d(GLdouble s) {
@@ -3186,6 +3361,138 @@ static void APIENTRY TexCoord4s(GLshort s, GLshort t, GLshort r, GLshort q) {
 
 static void APIENTRY TexCoord4sv(const GLshort* v) {
   TexCoord4s(v[0], v[1], v[2], v[3]);
+}
+
+static void APIENTRY MultiTexCoord1dARB(GLenum texture, GLdouble s) {
+  MultiTexCoord4fARB(texture, (GLfloat)s, 0.0f, 0.0f, 1.0f);
+}
+
+static void APIENTRY MultiTexCoord1dvARB(GLenum texture, const GLdouble* v) {
+  MultiTexCoord1dARB(texture, v[0]);
+}
+
+static void APIENTRY MultiTexCoord1fARB(GLenum texture, GLfloat s) {
+  MultiTexCoord4fARB(texture, s, 0.0f, 0.0f, 1.0f);
+}
+
+static void APIENTRY MultiTexCoord1fvARB(GLenum texture, const GLfloat* v) {
+  MultiTexCoord1fARB(texture, v[0]);
+}
+
+static void APIENTRY MultiTexCoord1iARB(GLenum texture, GLint s) {
+  MultiTexCoord4fARB(texture, (GLfloat)s, 0.0f, 0.0f, 1.0f);
+}
+
+static void APIENTRY MultiTexCoord1ivARB(GLenum texture, const GLint* v) {
+  MultiTexCoord1iARB(texture, v[0]);
+}
+
+static void APIENTRY MultiTexCoord1sARB(GLenum texture, GLshort s) {
+  MultiTexCoord4fARB(texture, (GLfloat)s, 0.0f, 0.0f, 1.0f);
+}
+
+static void APIENTRY MultiTexCoord1svARB(GLenum texture, const GLshort* v) {
+  MultiTexCoord1sARB(texture, v[0]);
+}
+
+static void APIENTRY MultiTexCoord2dARB(GLenum texture, GLdouble s,
+                                        GLdouble t) {
+  MultiTexCoord4fARB(texture, (GLfloat)s, (GLfloat)t, 0.0f, 1.0f);
+}
+
+static void APIENTRY MultiTexCoord2dvARB(GLenum texture, const GLdouble* v) {
+  MultiTexCoord2dARB(texture, v[0], v[1]);
+}
+
+static void APIENTRY MultiTexCoord2fARB(GLenum texture, GLfloat s, GLfloat t) {
+  MultiTexCoord4fARB(texture, s, t, 0.0f, 1.0f);
+}
+
+static void APIENTRY MultiTexCoord2fvARB(GLenum texture, const GLfloat* v) {
+  MultiTexCoord2fARB(texture, v[0], v[1]);
+}
+
+static void APIENTRY MultiTexCoord2iARB(GLenum texture, GLint s, GLint t) {
+  MultiTexCoord4fARB(texture, (GLfloat)s, (GLfloat)t, 0.0f, 1.0f);
+}
+
+static void APIENTRY MultiTexCoord2ivARB(GLenum texture, const GLint* v) {
+  MultiTexCoord2iARB(texture, v[0], v[1]);
+}
+
+static void APIENTRY MultiTexCoord2sARB(GLenum texture, GLshort s, GLshort t) {
+  MultiTexCoord4fARB(texture, (GLfloat)s, (GLfloat)t, 0.0f, 1.0f);
+}
+
+static void APIENTRY MultiTexCoord2svARB(GLenum texture, const GLshort* v) {
+  MultiTexCoord2sARB(texture, v[0], v[1]);
+}
+
+static void APIENTRY MultiTexCoord3dARB(GLenum texture, GLdouble s, GLdouble t,
+                                        GLdouble r) {
+  MultiTexCoord4fARB(texture, (GLfloat)s, (GLfloat)t, (GLfloat)r, 1.0f);
+}
+
+static void APIENTRY MultiTexCoord3dvARB(GLenum texture, const GLdouble* v) {
+  MultiTexCoord3dARB(texture, v[0], v[1], v[2]);
+}
+
+static void APIENTRY MultiTexCoord3fARB(GLenum texture, GLfloat s, GLfloat t,
+                                        GLfloat r) {
+  MultiTexCoord4fARB(texture, s, t, r, 1.0f);
+}
+
+static void APIENTRY MultiTexCoord3fvARB(GLenum texture, const GLfloat* v) {
+  MultiTexCoord3fARB(texture, v[0], v[1], v[2]);
+}
+
+static void APIENTRY MultiTexCoord3iARB(GLenum texture, GLint s, GLint t,
+                                        GLint r) {
+  MultiTexCoord4fARB(texture, (GLfloat)s, (GLfloat)t, (GLfloat)r, 1.0f);
+}
+
+static void APIENTRY MultiTexCoord3ivARB(GLenum texture, const GLint* v) {
+  MultiTexCoord3iARB(texture, v[0], v[1], v[2]);
+}
+
+static void APIENTRY MultiTexCoord3sARB(GLenum texture, GLshort s, GLshort t,
+                                        GLshort r) {
+  MultiTexCoord4fARB(texture, (GLfloat)s, (GLfloat)t, (GLfloat)r, 1.0f);
+}
+
+static void APIENTRY MultiTexCoord3svARB(GLenum texture, const GLshort* v) {
+  MultiTexCoord3sARB(texture, v[0], v[1], v[2]);
+}
+
+static void APIENTRY MultiTexCoord4dARB(GLenum texture, GLdouble s, GLdouble t,
+                                        GLdouble r, GLdouble q) {
+  MultiTexCoord4fARB(texture, (GLfloat)s, (GLfloat)t, (GLfloat)r, (GLfloat)q);
+}
+
+static void APIENTRY MultiTexCoord4dvARB(GLenum texture, const GLdouble* v) {
+  MultiTexCoord4dARB(texture, v[0], v[1], v[2], v[3]);
+}
+
+static void APIENTRY MultiTexCoord4fvARB(GLenum texture, const GLfloat* v) {
+  MultiTexCoord4fARB(texture, v[0], v[1], v[2], v[3]);
+}
+
+static void APIENTRY MultiTexCoord4iARB(GLenum texture, GLint s, GLint t,
+                                        GLint r, GLint q) {
+  MultiTexCoord4fARB(texture, (GLfloat)s, (GLfloat)t, (GLfloat)r, (GLfloat)q);
+}
+
+static void APIENTRY MultiTexCoord4ivARB(GLenum texture, const GLint* v) {
+  MultiTexCoord4iARB(texture, v[0], v[1], v[2], v[3]);
+}
+
+static void APIENTRY MultiTexCoord4sARB(GLenum texture, GLshort s, GLshort t,
+                                        GLshort r, GLshort q) {
+  MultiTexCoord4fARB(texture, (GLfloat)s, (GLfloat)t, (GLfloat)r, (GLfloat)q);
+}
+
+static void APIENTRY MultiTexCoord4svARB(GLenum texture, const GLshort* v) {
+  MultiTexCoord4sARB(texture, v[0], v[1], v[2], v[3]);
 }
 
 static void APIENTRY EdgeFlag(GLboolean flag) {
@@ -3315,13 +3622,15 @@ static void APIENTRY ArrayElement(GLint i) {
                   .pointer)[(ptrdiff_t)i * (stride ? stride : 1)]);
   }
   float values[4];
-  const Array* texcoords = &arrays[kTexCoordArray];
-  if (texcoords->enabled) {
-    for (int c = 0; c < 4; c++) {
-      values[c] = c < texcoords->size ? ArrayComponent(texcoords, i, c, false)
-                                      : (c == 3 ? 1.0f : 0.0f);
+  for (int unit = 0; unit < kTextureUnits; unit++) {
+    const Array* texcoords = &arrays[kTexCoordArray + unit];
+    if (texcoords->enabled) {
+      for (int c = 0; c < 4; c++) {
+        values[c] = c < texcoords->size ? ArrayComponent(texcoords, i, c, false)
+                                        : (c == 3 ? 1.0f : 0.0f);
+      }
+      MultiTexCoord4fvARB(GL_TEXTURE0_ARB + unit, values);
     }
-    TexCoord4fv(values);
   }
   const Array* colors = &arrays[kColorArray];
   if (colors->enabled) {
@@ -3471,9 +3780,13 @@ static void APIENTRY IndexPointer(GLenum type, GLsizei stride,
            stride, pointer);
 }
 
+static int TexCoordArray(const Context* context) {
+  return kTexCoordArray + context->client.active_texture;
+}
+
 static void APIENTRY TexCoordPointer(GLint size, GLenum type, GLsizei stride,
                                      const GLvoid* pointer) {
-  SetArray(kTexCoordArray, size >= 1 && size <= 4,
+  SetArray(TexCoordArray(current), size >= 1 && size <= 4,
            IsArrayType(type, false, false), size, type, stride, pointer);
 }
 
@@ -3481,7 +3794,7 @@ static void APIENTRY EdgeFlagPointer(GLsizei stride, const GLvoid* pointer) {
   SetArray(kEdgeFlagArray, true, true, 1, GL_UNSIGNED_BYTE, stride, pointer);
 }
 
-static int ArrayIndex(GLenum array) {
+static int ArrayIndex(const Context* context, GLenum array) {
   switch (array) {
     case GL_VERTEX_ARRAY:
       return kVertexArray;
@@ -3492,7 +3805,7 @@ static int ArrayIndex(GLenum array) {
     case GL_INDEX_ARRAY:
       return kIndexArray;
     case GL_TEXTURE_COORD_ARRAY:
-      return kTexCoordArray;
+      return TexCoordArray(context);
     case GL_EDGE_FLAG_ARRAY:
       return kEdgeFlagArray;
     default:
@@ -3504,7 +3817,7 @@ static void SetClientState(GLenum array, bool enabled) {
   if (InsideBeginEnd(current)) {
     return;
   }
-  int index = ArrayIndex(array);
+  int index = ArrayIndex(current, array);
   if (index < 0) {
     SetError(current, GL_INVALID_ENUM);
     return;
@@ -3518,6 +3831,18 @@ static void APIENTRY EnableClientState(GLenum array) {
 
 static void APIENTRY DisableClientState(GLenum array) {
   SetClientState(array, false);
+}
+
+static void APIENTRY ClientActiveTextureARB(GLenum texture) {
+  Context* context = current;
+  if (InsideBeginEnd(context)) {
+    return;
+  }
+  if (!IsTextureUnit(texture)) {
+    SetError(context, GL_INVALID_ENUM);
+    return;
+  }
+  context->client.active_texture = (int)(texture - GL_TEXTURE0_ARB);
 }
 
 static void APIENTRY InterleavedArrays(GLenum format, GLsizei stride,
@@ -3566,7 +3891,7 @@ static void APIENTRY InterleavedArrays(GLenum format, GLsizei stride,
     Array* arrays = context->client.arrays;
     arrays[kEdgeFlagArray].enabled = false;
     arrays[kIndexArray].enabled = false;
-    arrays[kTexCoordArray].enabled = kLayouts[i].texcoords > 0;
+    arrays[TexCoordArray(context)].enabled = kLayouts[i].texcoords > 0;
     if (kLayouts[i].texcoords) {
       TexCoordPointer(kLayouts[i].texcoords, GL_FLOAT, step, base);
     }
@@ -3667,19 +3992,19 @@ static void EmitEvaluated(Context* context, const bool enabled[kMaps],
   const float* normal = normal_override ? normal_override
                         : enabled[2]    ? values[2]
                                         : current_state->normal;
-  float texcoord[4];
-  memcpy(texcoord, current_state->texcoord, sizeof(texcoord));
+  float texcoords[kTextureUnits][4];
+  memcpy(texcoords, current_state->texcoord, sizeof(texcoords));
   int texcoord_map = HighestMap(enabled, 3, 6);
   if (texcoord_map >= 0) {
     for (int c = 0; c < 4; c++) {
-      texcoord[c] = c < kMapSizes[texcoord_map] ? values[texcoord_map][c]
-                                                : (c == 3 ? 1.0f : 0.0f);
+      texcoords[0][c] = c < kMapSizes[texcoord_map] ? values[texcoord_map][c]
+                                                    : (c == 3 ? 1.0f : 0.0f);
     }
   }
   float object[4] = {values[vertex_map][0], values[vertex_map][1],
                      values[vertex_map][2],
                      vertex_map == 8 ? values[vertex_map][3] : 1.0f};
-  EmitVertex(context, object, color, normal, texcoord);
+  EmitVertex(context, object, color, normal, texcoords);
 }
 
 static void EvalCoord1(Context* context, float u) {
@@ -3877,6 +4202,10 @@ static void SetMap(Context* context, int dimensions, GLenum target,
   if (InsideBeginEnd(context)) {
     return;
   }
+  if (context->state.texture.active != 0) {
+    SetError(context, GL_INVALID_OPERATION);
+    return;
+  }
   int index =
       MapIndex(target, dimensions == 1 ? GL_MAP1_COLOR_4 : GL_MAP2_COLOR_4);
   if (index < 0) {
@@ -4069,21 +4398,10 @@ static void APIENTRY MapGrid2d(GLint un, GLdouble u1, GLdouble u2, GLint vn,
   MapGrid2f(un, (GLfloat)u1, (GLfloat)u2, vn, (GLfloat)v1, (GLfloat)v2);
 }
 
-static int MatrixStack(const Context* context) {
-  switch (context->state.transform.matrix_mode) {
-    case GL_PROJECTION:
-      return kProjection;
-    case GL_TEXTURE:
-      return kTextureMatrix;
-    default:
-      return kModelview;
-  }
-}
-
 static int StackDepth(int stack) {
-  static const int kDepths[kMatrixStacks] = {kModelviewDepth, kProjectionDepth,
-                                             kTextureDepth};
-  return kDepths[stack];
+  return stack == kModelview    ? kModelviewDepth
+         : stack == kProjection ? kProjectionDepth
+                                : kTextureDepth;
 }
 
 static void APIENTRY MatrixMode(GLenum mode) {
@@ -4356,7 +4674,7 @@ static void APIENTRY TexGenfv(GLenum coord, GLenum pname,
     SetError(context, GL_INVALID_ENUM);
     return;
   }
-  TexGen* gen = &context->state.texture.gen[coord - GL_S];
+  TexGen* gen = &ActiveUnit(context)->gen[coord - GL_S];
   switch (pname) {
     case GL_TEXTURE_GEN_MODE: {
       GLenum mode = (GLenum)params[0];
@@ -4882,8 +5200,9 @@ static bool* Capability(State* state, GLenum cap) {
   if (MapIndex(cap, GL_MAP2_COLOR_4) >= 0) {
     return &state->eval.map2[MapIndex(cap, GL_MAP2_COLOR_4)];
   }
+  TextureUnit* unit = &state->texture.units[state->texture.active];
   if (cap >= GL_TEXTURE_GEN_S && cap <= GL_TEXTURE_GEN_Q) {
-    return &state->texture.gen[cap - GL_TEXTURE_GEN_S].enabled;
+    return &unit->gen[cap - GL_TEXTURE_GEN_S].enabled;
   }
   switch (cap) {
     case GL_ALPHA_TEST:
@@ -4931,9 +5250,9 @@ static bool* Capability(State* state, GLenum cap) {
     case GL_STENCIL_TEST:
       return &state->stencil.test;
     case GL_TEXTURE_1D:
-      return &state->texture.enabled[kTexture1D];
+      return &unit->enabled[kTexture1D];
     case GL_TEXTURE_2D:
-      return &state->texture.enabled[kTexture2D];
+      return &unit->enabled[kTexture2D];
     default:
       return NULL;
   }
@@ -4941,7 +5260,7 @@ static bool* Capability(State* state, GLenum cap) {
 
 static void SetCapability(Op op, GLenum cap, bool value) {
   Context* context = current;
-  if (ArrayIndex(cap) >= 0) {
+  if (ArrayIndex(context, cap) >= 0) {
     SetClientState(cap, value);
     return;
   }
@@ -5648,17 +5967,20 @@ static void APIENTRY PolygonStipple(const GLubyte* mask) {
 static void FeedbackRaster(Context* context, GLenum token) {
   const RasterPosition* raster = &context->state.current.raster;
   FeedbackValue(context, (float)token);
-  FeedbackVertex(context, raster->window, raster->color, raster->texcoord);
+  FeedbackVertex(context, raster->window, raster->color, raster->texcoord[0]);
 }
 
 static void RasterValues(const Context* context, const float color[4],
                          float values[kVaryings]) {
   const RasterPosition* raster = &context->state.current.raster;
   memcpy(values, color, 4 * sizeof(float));
-  values[kS] = raster->texcoord[0];
-  values[kT] = raster->texcoord[1];
-  values[kQ] = raster->texcoord[3];
   values[kFog] = raster->distance;
+  for (int unit = 0; unit < kTextureUnits; unit++) {
+    float* coord = &values[TexcoordVarying(unit)];
+    coord[kS] = raster->texcoord[unit][0];
+    coord[kT] = raster->texcoord[unit][1];
+    coord[kQ] = raster->texcoord[unit][3];
+  }
 }
 
 static void DrawBitmap(Context* context, GLsizei width, GLsizei height,
@@ -5689,7 +6011,7 @@ static void DrawBitmap(Context* context, GLsizei width, GLsizei height,
       for (int i = 0; i < width; i++) {
         if (ReadBit(store, bitmap, width, i, j)) {
           EmitFragment(context, &primitive, x0 + i, y0 + j, raster->window[2],
-                       values, 0.0f, 1.0f);
+                       values, NULL, 1.0f);
         }
       }
     }
@@ -5757,7 +6079,7 @@ static void DrawPixelRow(Context* context, const Primitive* primitive,
                              (size_t)x],
               (GLuint)group[0] & kStencilMax);
         } else {
-          EmitFragment(context, primitive, x, y, z, values, 0.0f, 1.0f);
+          EmitFragment(context, primitive, x, y, z, values, NULL, 1.0f);
         }
       }
     }
@@ -6108,7 +6430,7 @@ static bool FitsTexture(int size, int border, int level) {
 }
 
 static Level* TextureLevel(Context* context, int dimensions, GLint level) {
-  return &context->bound[dimensions - 1]->levels[level];
+  return &BoundTexture(context, dimensions - 1)->levels[level];
 }
 
 static void ReadTexels(Context* context, Level* level, int x0, int y0, int x,
@@ -6481,7 +6803,7 @@ static void APIENTRY TexParameterfv(GLenum target, GLenum pname,
     SetError(context, GL_INVALID_ENUM);
     return;
   }
-  TextureParameters* parameters = &context->bound[index]->parameters;
+  TextureParameters* parameters = &BoundTexture(context, index)->parameters;
   GLenum value = (GLenum)params[0];
   bool simple = value == GL_NEAREST || value == GL_LINEAR;
   bool mipmap =
@@ -6546,6 +6868,36 @@ static void APIENTRY TexParameteriv(GLenum target, GLenum pname,
   TexParameterfv(target, pname, values);
 }
 
+static bool IsCombineFunction(GLenum function) {
+  return function == GL_REPLACE || function == GL_MODULATE ||
+         function == GL_ADD || function == GL_ADD_SIGNED_ARB ||
+         function == GL_INTERPOLATE_ARB || function == GL_SUBTRACT_ARB;
+}
+
+static bool IsCombineSource(GLenum source) {
+  return source == GL_TEXTURE || source == GL_CONSTANT_ARB ||
+         source == GL_PRIMARY_COLOR_ARB || source == GL_PREVIOUS_ARB;
+}
+
+static bool IsCombineOperand(GLenum operand, bool alpha) {
+  return operand == GL_SRC_ALPHA || operand == GL_ONE_MINUS_SRC_ALPHA ||
+         (!alpha &&
+          (operand == GL_SRC_COLOR || operand == GL_ONE_MINUS_SRC_COLOR));
+}
+
+static Combiner* ArgumentCombiner(TextureUnit* unit, GLenum pname, GLenum rgb,
+                                  GLenum alpha, int* index) {
+  if (pname >= rgb && pname < rgb + 3) {
+    *index = (int)(pname - rgb);
+    return &unit->rgb;
+  }
+  if (pname >= alpha && pname < alpha + 3) {
+    *index = (int)(pname - alpha);
+    return &unit->alpha;
+  }
+  return NULL;
+}
+
 static void APIENTRY TexEnvfv(GLenum target, GLenum pname,
                               const GLfloat* params) {
   Context* context = current;
@@ -6557,19 +6909,59 @@ static void APIENTRY TexEnvfv(GLenum target, GLenum pname,
   if (Record(context, kOpTexEnv, args, 6) || InsideBeginEnd(context)) {
     return;
   }
-  TextureState* texture = &context->state.texture;
-  GLenum mode = (GLenum)params[0];
-  if (target == GL_TEXTURE_ENV && pname == GL_TEXTURE_ENV_MODE &&
-      (mode == GL_MODULATE || mode == GL_DECAL || mode == GL_BLEND ||
-       mode == GL_REPLACE)) {
-    texture->env_mode = mode;
-  } else if (target == GL_TEXTURE_ENV && pname == GL_TEXTURE_ENV_COLOR) {
-    for (int i = 0; i < 4; i++) {
-      texture->env_color[i] = Clamp01(params[i]);
-    }
-  } else {
+  if (target != GL_TEXTURE_ENV) {
     SetError(context, GL_INVALID_ENUM);
+    return;
   }
+  TextureUnit* unit = ActiveUnit(context);
+  GLenum value = (GLenum)params[0];
+  switch (pname) {
+    case GL_TEXTURE_ENV_MODE:
+      if (value == GL_MODULATE || value == GL_DECAL || value == GL_BLEND ||
+          value == GL_REPLACE || value == GL_ADD || value == GL_COMBINE_ARB) {
+        unit->env_mode = value;
+        return;
+      }
+      break;
+    case GL_TEXTURE_ENV_COLOR:
+      for (int i = 0; i < 4; i++) {
+        unit->env_color[i] = Clamp01(params[i]);
+      }
+      return;
+    case GL_COMBINE_RGB_ARB:
+    case GL_COMBINE_ALPHA_ARB:
+      if (IsCombineFunction(value)) {
+        (pname == GL_COMBINE_RGB_ARB ? &unit->rgb : &unit->alpha)->function =
+            value;
+        return;
+      }
+      break;
+    case GL_RGB_SCALE_ARB:
+    case GL_ALPHA_SCALE:
+      if (params[0] != 1.0f && params[0] != 2.0f && params[0] != 4.0f) {
+        SetError(context, GL_INVALID_VALUE);
+        return;
+      }
+      (pname == GL_RGB_SCALE_ARB ? &unit->rgb : &unit->alpha)->scale =
+          params[0];
+      return;
+    default: {
+      int index;
+      Combiner* combiner = ArgumentCombiner(unit, pname, GL_SOURCE0_RGB_ARB,
+                                            GL_SOURCE0_ALPHA_ARB, &index);
+      if (combiner && IsCombineSource(value)) {
+        combiner->source[index] = value;
+        return;
+      }
+      combiner = ArgumentCombiner(unit, pname, GL_OPERAND0_RGB_ARB,
+                                  GL_OPERAND0_ALPHA_ARB, &index);
+      if (combiner && IsCombineOperand(value, combiner == &unit->alpha)) {
+        combiner->operand[index] = value;
+        return;
+      }
+    }
+  }
+  SetError(context, GL_INVALID_ENUM);
 }
 
 static void APIENTRY TexEnvf(GLenum target, GLenum pname, GLfloat param) {
@@ -6599,16 +6991,20 @@ static void FreeLevels(Texture* texture) {
 }
 
 static void ResolveBindings(Context* context) {
-  for (int target = kTexture1D; target <= kTexture2D; target++) {
-    GLuint name = context->state.texture.binding[target];
-    Name* entry = name ? FindName(&context->shared->textures, name) : NULL;
-    Texture* texture = entry ? entry->object : NULL;
-    GLenum expected = target == kTexture1D ? GL_TEXTURE_1D : GL_TEXTURE_2D;
-    if (!texture || texture->target != expected) {
-      texture = &context->default_textures[target];
-      context->state.texture.binding[target] = 0;
+  for (int unit = 0; unit < kTextureUnits; unit++) {
+    GLuint* binding = context->state.texture.units[unit].binding;
+    for (int target = kTexture1D; target <= kTexture2D; target++) {
+      Name* entry = binding[target]
+                        ? FindName(&context->shared->textures, binding[target])
+                        : NULL;
+      Texture* texture = entry ? entry->object : NULL;
+      GLenum expected = target == kTexture1D ? GL_TEXTURE_1D : GL_TEXTURE_2D;
+      if (!texture || texture->target != expected) {
+        texture = &context->default_textures[target];
+        binding[target] = 0;
+      }
+      context->bound[unit][target] = texture;
     }
-    context->bound[target] = texture;
   }
 }
 
@@ -6639,7 +7035,7 @@ static void APIENTRY BindTexture(GLenum target, GLuint texture) {
       AddName(names, texture, object);
     }
   }
-  context->state.texture.binding[index] = texture;
+  ActiveUnit(context)->binding[index] = texture;
   ResolveBindings(context);
 }
 
@@ -6756,6 +7152,19 @@ static void APIENTRY PrioritizeTextures(GLsizei n, const GLuint* textures,
     }
   }
   PrioritizeFrom(context, n, textures, priorities);
+}
+
+static void APIENTRY ActiveTextureARB(GLenum texture) {
+  Context* context = current;
+  if (Record(context, kOpActiveTexture, (Arg[]){{.u = texture}}, 1) ||
+      InsideBeginEnd(context)) {
+    return;
+  }
+  if (!IsTextureUnit(texture)) {
+    SetError(context, GL_INVALID_ENUM);
+    return;
+  }
+  context->state.texture.active = (int)(texture - GL_TEXTURE0_ARB);
 }
 
 static void APIENTRY Scissor(GLint x, GLint y, GLsizei width, GLsizei height) {
@@ -7424,6 +7833,14 @@ static void CopyGroups(State* destination, State* source, GLbitfield mask) {
       *Capability(destination, kCapabilities[i]) =
           *Capability(source, kCapabilities[i]);
     }
+    for (int unit = 0; unit < kTextureUnits; unit++) {
+      TextureUnit* to = &destination->texture.units[unit];
+      const TextureUnit* from = &source->texture.units[unit];
+      memcpy(to->enabled, from->enabled, sizeof(to->enabled));
+      for (int coord = 0; coord < 4; coord++) {
+        to->gen[coord].enabled = from->gen[coord].enabled;
+      }
+    }
   }
 }
 
@@ -7440,8 +7857,10 @@ static void APIENTRY PushAttrib(GLbitfield mask) {
   AttribEntry* entry = &context->attrib_stack[context->attrib_depth++];
   entry->mask = mask;
   entry->state = context->state;
-  for (int target = kTexture1D; target <= kTexture2D; target++) {
-    entry->textures[target] = context->bound[target]->parameters;
+  for (int unit = 0; unit < kTextureUnits; unit++) {
+    for (int target = kTexture1D; target <= kTexture2D; target++) {
+      entry->textures[unit][target] = context->bound[unit][target]->parameters;
+    }
   }
 }
 
@@ -7458,8 +7877,11 @@ static void APIENTRY PopAttrib(void) {
   CopyGroups(&context->state, &entry->state, entry->mask);
   if (entry->mask & GL_TEXTURE_BIT) {
     ResolveBindings(context);
-    for (int target = kTexture1D; target <= kTexture2D; target++) {
-      context->bound[target]->parameters = entry->textures[target];
+    for (int unit = kTextureUnits - 1; unit >= 0; unit--) {
+      for (int target = kTexture1D; target <= kTexture2D; target++) {
+        context->bound[unit][target]->parameters =
+            entry->textures[unit][target];
+      }
     }
   }
 }
@@ -7495,6 +7917,7 @@ static void APIENTRY PopClientAttrib(void) {
   if (entry->mask & GL_CLIENT_VERTEX_ARRAY_BIT) {
     memcpy(context->client.arrays, entry->state.arrays,
            sizeof(context->client.arrays));
+    context->client.active_texture = entry->state.active_texture;
   }
 }
 
@@ -7536,7 +7959,7 @@ static void ExecuteList(Context* context, GLuint name) {
         Normal3f(a[0].f, a[1].f, a[2].f);
         break;
       case kOpTexCoord:
-        TexCoord4f(a[0].f, a[1].f, a[2].f, a[3].f);
+        MultiTexCoord4fARB(a[0].u, a[1].f, a[2].f, a[3].f, a[4].f);
         break;
       case kOpEdgeFlag:
         EdgeFlag((GLboolean)a[0].u);
@@ -7693,6 +8116,9 @@ static void ExecuteList(Context* context, GLuint name) {
       case kOpPrioritizeTextures:
         PrioritizeFrom(context, a[0].i, data,
                        (const GLclampf*)((const GLuint*)data + a[0].i));
+        break;
+      case kOpActiveTexture:
+        ActiveTextureARB(a[0].u);
         break;
       case kOpScissor:
         Scissor(a[0].i, a[1].i, a[2].i, a[3].i);
@@ -8040,6 +8466,7 @@ static int Pair(double values[16], double first, double second) {
 static int StateValues(Context* context, GLenum pname, double values[16],
                        bool* color) {
   State* s = &context->state;
+  int active = s->texture.active;
   const ClientState* client = &context->client;
   const Array* arrays = client->arrays;
   *color = false;
@@ -8047,7 +8474,7 @@ static int StateValues(Context* context, GLenum pname, double values[16],
   if (flag) {
     return Number(values, *flag);
   }
-  int array = ArrayIndex(pname);
+  int array = ArrayIndex(context, pname);
   if (array >= 0) {
     return Number(values, arrays[array].enabled);
   }
@@ -8069,14 +8496,14 @@ static int StateValues(Context* context, GLenum pname, double values[16],
       *color = true;
       return Floats(values, s->current.normal, 3);
     case GL_CURRENT_TEXTURE_COORDS:
-      return Floats(values, s->current.texcoord, 4);
+      return Floats(values, s->current.texcoord[active], 4);
     case GL_CURRENT_RASTER_COLOR:
       *color = true;
       return Floats(values, s->current.raster.color, 4);
     case GL_CURRENT_RASTER_INDEX:
       return Number(values, s->current.raster.index);
     case GL_CURRENT_RASTER_TEXTURE_COORDS:
-      return Floats(values, s->current.raster.texcoord, 4);
+      return Floats(values, s->current.raster.texcoord[active], 4);
     case GL_CURRENT_RASTER_POSITION:
       return Floats(values, s->current.raster.window, 4);
     case GL_CURRENT_RASTER_POSITION_VALID:
@@ -8085,6 +8512,10 @@ static int StateValues(Context* context, GLenum pname, double values[16],
       return Number(values, s->current.raster.distance);
     case GL_EDGE_FLAG:
       return Number(values, s->current.edge_flag);
+    case GL_ACTIVE_TEXTURE_ARB:
+      return Number(values, GL_TEXTURE0_ARB + active);
+    case GL_CLIENT_ACTIVE_TEXTURE_ARB:
+      return Number(values, GL_TEXTURE0_ARB + client->active_texture);
     case GL_VERTEX_ARRAY_SIZE:
       return Number(values, arrays[kVertexArray].size);
     case GL_VERTEX_ARRAY_TYPE:
@@ -8106,11 +8537,11 @@ static int StateValues(Context* context, GLenum pname, double values[16],
     case GL_INDEX_ARRAY_STRIDE:
       return Number(values, arrays[kIndexArray].stride);
     case GL_TEXTURE_COORD_ARRAY_SIZE:
-      return Number(values, arrays[kTexCoordArray].size);
+      return Number(values, arrays[TexCoordArray(context)].size);
     case GL_TEXTURE_COORD_ARRAY_TYPE:
-      return Number(values, arrays[kTexCoordArray].type);
+      return Number(values, arrays[TexCoordArray(context)].type);
     case GL_TEXTURE_COORD_ARRAY_STRIDE:
-      return Number(values, arrays[kTexCoordArray].stride);
+      return Number(values, arrays[TexCoordArray(context)].stride);
     case GL_EDGE_FLAG_ARRAY_STRIDE:
       return Number(values, arrays[kEdgeFlagArray].stride);
     case GL_MODELVIEW_MATRIX:
@@ -8118,13 +8549,13 @@ static int StateValues(Context* context, GLenum pname, double values[16],
     case GL_PROJECTION_MATRIX:
       return Floats(values, TopMatrix(context, kProjection), 16);
     case GL_TEXTURE_MATRIX:
-      return Floats(values, TopMatrix(context, kTextureMatrix), 16);
+      return Floats(values, TopMatrix(context, kTextureMatrix + active), 16);
     case GL_MODELVIEW_STACK_DEPTH:
       return Number(values, context->matrix_top[kModelview] + 1);
     case GL_PROJECTION_STACK_DEPTH:
       return Number(values, context->matrix_top[kProjection] + 1);
     case GL_TEXTURE_STACK_DEPTH:
-      return Number(values, context->matrix_top[kTextureMatrix] + 1);
+      return Number(values, context->matrix_top[kTextureMatrix + active] + 1);
     case GL_VIEWPORT:
       for (int i = 0; i < 4; i++) {
         values[i] = s->viewport.box[i];
@@ -8180,9 +8611,9 @@ static int StateValues(Context* context, GLenum pname, double values[16],
     case GL_POLYGON_OFFSET_UNITS:
       return Number(values, s->polygon.offset_units);
     case GL_TEXTURE_BINDING_1D:
-      return Number(values, s->texture.binding[kTexture1D]);
+      return Number(values, s->texture.units[active].binding[kTexture1D]);
     case GL_TEXTURE_BINDING_2D:
-      return Number(values, s->texture.binding[kTexture2D]);
+      return Number(values, s->texture.units[active].binding[kTexture2D]);
     case GL_SCISSOR_BOX:
       for (int i = 0; i < 4; i++) {
         values[i] = s->scissor.box[i];
@@ -8321,6 +8752,8 @@ static int StateValues(Context* context, GLenum pname, double values[16],
       return Number(values, kTextureDepth);
     case GL_SUBPIXEL_BITS:
       return Number(values, kSubpixelBits);
+    case GL_MAX_TEXTURE_UNITS_ARB:
+      return Number(values, kTextureUnits);
     case GL_MAX_TEXTURE_SIZE:
       return Number(values, kMaxTextureSize);
     case GL_MAX_PIXEL_MAP_TABLE:
@@ -8443,7 +8876,7 @@ static GLboolean APIENTRY IsEnabled(GLenum cap) {
     return GL_FALSE;
   }
   bool* flag = Capability(&context->state, cap);
-  int array = ArrayIndex(cap);
+  int array = ArrayIndex(context, cap);
   if (!flag && array < 0) {
     SetError(context, GL_INVALID_ENUM);
     return GL_FALSE;
@@ -8474,7 +8907,9 @@ static const GLubyte* APIENTRY GetString(GLenum name) {
     case GL_VERSION:
       return (const GLubyte*)"1.1";
     case GL_EXTENSIONS:
-      return (const GLubyte*)"WGL_EXT_swap_control";
+      return (const GLubyte*)"GL_ARB_multitexture GL_ARB_texture_env_add "
+                             "GL_ARB_texture_env_combine "
+                             "GL_EXT_texture_env_add WGL_EXT_swap_control";
     default:
       SetError(context, GL_INVALID_ENUM);
       return NULL;
@@ -8612,17 +9047,48 @@ static int TexEnvValues(GLenum target, GLenum pname, float values[4]) {
   if (InsideBeginEnd(context)) {
     return 0;
   }
-  if (target != GL_TEXTURE_ENV ||
-      (pname != GL_TEXTURE_ENV_MODE && pname != GL_TEXTURE_ENV_COLOR)) {
+  if (target != GL_TEXTURE_ENV) {
     SetError(context, GL_INVALID_ENUM);
     return 0;
   }
-  if (pname == GL_TEXTURE_ENV_MODE) {
-    values[0] = (float)context->state.texture.env_mode;
-    return 1;
+  TextureUnit* unit = ActiveUnit(context);
+  switch (pname) {
+    case GL_TEXTURE_ENV_MODE:
+      values[0] = (float)unit->env_mode;
+      return 1;
+    case GL_TEXTURE_ENV_COLOR:
+      memcpy(values, unit->env_color, 4 * sizeof(float));
+      return 4;
+    case GL_COMBINE_RGB_ARB:
+      values[0] = (float)unit->rgb.function;
+      return 1;
+    case GL_COMBINE_ALPHA_ARB:
+      values[0] = (float)unit->alpha.function;
+      return 1;
+    case GL_RGB_SCALE_ARB:
+      values[0] = unit->rgb.scale;
+      return 1;
+    case GL_ALPHA_SCALE:
+      values[0] = unit->alpha.scale;
+      return 1;
+    default: {
+      int index;
+      const Combiner* combiner = ArgumentCombiner(
+          unit, pname, GL_SOURCE0_RGB_ARB, GL_SOURCE0_ALPHA_ARB, &index);
+      if (combiner) {
+        values[0] = (float)combiner->source[index];
+        return 1;
+      }
+      combiner = ArgumentCombiner(unit, pname, GL_OPERAND0_RGB_ARB,
+                                  GL_OPERAND0_ALPHA_ARB, &index);
+      if (combiner) {
+        values[0] = (float)combiner->operand[index];
+        return 1;
+      }
+      SetError(context, GL_INVALID_ENUM);
+      return 0;
+    }
   }
-  memcpy(values, context->state.texture.env_color, 4 * sizeof(float));
-  return 4;
 }
 
 static void APIENTRY GetTexEnvfv(GLenum target, GLenum pname, GLfloat* params) {
@@ -8648,7 +9114,7 @@ static int TexGenValues(GLenum coord, GLenum pname, float values[4]) {
     SetError(context, GL_INVALID_ENUM);
     return 0;
   }
-  const TexGen* gen = &context->state.texture.gen[coord - GL_S];
+  const TexGen* gen = &ActiveUnit(context)->gen[coord - GL_S];
   switch (pname) {
     case GL_TEXTURE_GEN_MODE:
       values[0] = (float)gen->mode;
@@ -8697,7 +9163,8 @@ static int TexParameterValues(GLenum target, GLenum pname, float values[4]) {
     SetError(context, GL_INVALID_ENUM);
     return 0;
   }
-  const TextureParameters* parameters = &context->bound[index]->parameters;
+  const TextureParameters* parameters =
+      &BoundTexture(context, index)->parameters;
   switch (pname) {
     case GL_TEXTURE_MIN_FILTER:
       values[0] = (float)parameters->min_filter;
@@ -8775,7 +9242,7 @@ static bool LevelValue(GLenum target, GLint level, GLenum pname, GLint* value) {
   }
   const Level* source =
       proxy ? &context->proxies[target == GL_PROXY_TEXTURE_1D ? 0 : 1][level]
-            : &context->bound[index]->levels[level];
+            : &BoundTexture(context, index)->levels[level];
   switch (pname) {
     case GL_TEXTURE_WIDTH:
       *value = source->width;
@@ -8838,7 +9305,7 @@ static void APIENTRY GetTexImage(GLenum target, GLint level, GLenum format,
     SetError(context, GL_INVALID_VALUE);
     return;
   }
-  const Level* source = &context->bound[index]->levels[level];
+  const Level* source = &BoundTexture(context, index)->levels[level];
   if (!source->texels) {
     return;
   }
@@ -8999,7 +9466,7 @@ static void APIENTRY GetPointerv(GLenum pname, GLvoid** params) {
       *params = (GLvoid*)arrays[kIndexArray].pointer;
       break;
     case GL_TEXTURE_COORD_ARRAY_POINTER:
-      *params = (GLvoid*)arrays[kTexCoordArray].pointer;
+      *params = (GLvoid*)arrays[TexCoordArray(context)].pointer;
       break;
     case GL_EDGE_FLAG_ARRAY_POINTER:
       *params = (GLvoid*)arrays[kEdgeFlagArray].pointer;
@@ -9039,13 +9506,40 @@ static void InitState(State* state) {
       .cutoff = 180.0f,
       .attenuation = {1.0f, 0.0f, 0.0f},
   };
+  static const TextureUnit kTextureUnit = {
+      .env_mode = GL_MODULATE,
+      .rgb =
+          {
+              .function = GL_MODULATE,
+              .source = {GL_TEXTURE, GL_PREVIOUS_ARB, GL_CONSTANT_ARB},
+              .operand = {GL_SRC_COLOR, GL_SRC_COLOR, GL_SRC_ALPHA},
+              .scale = 1.0f,
+          },
+      .alpha =
+          {
+              .function = GL_MODULATE,
+              .source = {GL_TEXTURE, GL_PREVIOUS_ARB, GL_CONSTANT_ARB},
+              .operand = {GL_SRC_ALPHA, GL_SRC_ALPHA, GL_SRC_ALPHA},
+              .scale = 1.0f,
+          },
+      .gen =
+          {
+              {.mode = GL_EYE_LINEAR,
+               .object = {1.0f, 0.0f, 0.0f, 0.0f},
+               .eye = {1.0f, 0.0f, 0.0f, 0.0f}},
+              {.mode = GL_EYE_LINEAR,
+               .object = {0.0f, 1.0f, 0.0f, 0.0f},
+               .eye = {0.0f, 1.0f, 0.0f, 0.0f}},
+              {.mode = GL_EYE_LINEAR},
+              {.mode = GL_EYE_LINEAR},
+          },
+  };
   *state = (State){
       .current =
           {
               .color = {1.0f, 1.0f, 1.0f, 1.0f},
               .index = 1.0f,
               .normal = {0.0f, 0.0f, 1.0f},
-              .texcoord = {0.0f, 0.0f, 0.0f, 1.0f},
               .edge_flag = true,
               .raster =
                   {
@@ -9053,7 +9547,6 @@ static void InitState(State* state) {
                       .valid = true,
                       .color = {1.0f, 1.0f, 1.0f, 1.0f},
                       .index = 1.0f,
-                      .texcoord = {0.0f, 0.0f, 0.0f, 1.0f},
                   },
           },
       .point = {.size = 1.0f},
@@ -9118,7 +9611,6 @@ static void InitState(State* state) {
               .segments2 = {1, 1},
               .domain2 = {0.0f, 1.0f, 0.0f, 1.0f},
           },
-      .texture = {.env_mode = GL_MODULATE},
   };
   for (int i = 0; i < kStippleSize; i++) {
     state->stipple[i] = UINT32_MAX;
@@ -9129,13 +9621,10 @@ static void InitState(State* state) {
   float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
   memcpy(state->lighting.lights[0].diffuse, white, sizeof(white));
   memcpy(state->lighting.lights[0].specular, white, sizeof(white));
-  for (int i = 0; i < 4; i++) {
-    TexGen* gen = &state->texture.gen[i];
-    gen->mode = GL_EYE_LINEAR;
-    if (i < 2) {
-      gen->object[i] = 1.0f;
-      gen->eye[i] = 1.0f;
-    }
+  for (int unit = 0; unit < kTextureUnits; unit++) {
+    state->texture.units[unit] = kTextureUnit;
+    state->current.texcoord[unit][3] = 1.0f;
+    state->current.raster.texcoord[unit][3] = 1.0f;
   }
 }
 
@@ -9164,7 +9653,9 @@ static void InitContext(Context* context) {
         .target = target == kTexture1D ? GL_TEXTURE_1D : GL_TEXTURE_2D,
         .parameters = kDefaultParameters,
     };
-    context->bound[target] = &context->default_textures[target];
+    for (int unit = 0; unit < kTextureUnits; unit++) {
+      context->bound[unit][target] = &context->default_textures[target];
+    }
   }
   for (int i = 0; i < kPixelMaps; i++) {
     context->pixel_maps[i].size = 1;
@@ -9437,16 +9928,16 @@ static int WINAPI GetSwapIntervalEXT(void) {
   return current ? current->framebuffer->swap_interval : 0;
 }
 
+#define SOFTGPU_PROC(ret, name, params) {"gl" #name, (PROC)name},
 PROC APIENTRY DrvGetProcAddress(LPCSTR name) {
   static const struct {
     const char* name;
     PROC proc;
-  } kProcs[] = {
-      {"wglGetExtensionsStringARB", (PROC)GetExtensionsStringARB},
-      {"wglGetExtensionsStringEXT", (PROC)GetExtensionsStringEXT},
-      {"wglSwapIntervalEXT", (PROC)SwapIntervalEXT},
-      {"wglGetSwapIntervalEXT", (PROC)GetSwapIntervalEXT},
-  };
+  } kProcs[] = {{"wglGetExtensionsStringARB", (PROC)GetExtensionsStringARB},
+                {"wglGetExtensionsStringEXT", (PROC)GetExtensionsStringEXT},
+                {"wglSwapIntervalEXT", (PROC)SwapIntervalEXT},
+                {"wglGetSwapIntervalEXT", (PROC)GetSwapIntervalEXT},
+                SOFTGPU_ARB_MULTITEXTURE(SOFTGPU_PROC)};
   for (size_t i = 0; name && i < sizeof(kProcs) / sizeof(kProcs[0]); i++) {
     if (strcmp(name, kProcs[i].name) == 0) {
       return kProcs[i].proc;
@@ -9454,6 +9945,7 @@ PROC APIENTRY DrvGetProcAddress(LPCSTR name) {
   }
   return NULL;
 }
+#undef SOFTGPU_PROC
 
 BOOL APIENTRY DrvSwapBuffers(HDC hdc) {
   HWND window = WindowFromDC(hdc);

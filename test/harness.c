@@ -10,6 +10,10 @@
 typedef struct Gl {
   SOFTGPU_GL11(SOFTGPU_FIELD)
 } Gl;
+
+typedef struct Multitexture {
+  SOFTGPU_ARB_MULTITEXTURE(SOFTGPU_FIELD)
+} Multitexture;
 #undef SOFTGPU_FIELD
 
 typedef const char*(WINAPI* ExtensionsArbFn)(HDC);
@@ -756,6 +760,143 @@ static void TestTextures(void) {
   ExpectError(GL_NO_ERROR, "textures");
 }
 
+static GLuint Texture2x1(const GLubyte texels[6]) {
+  GLuint texture;
+  gl.GenTextures(1, &texture);
+  gl.BindTexture(GL_TEXTURE_2D, texture);
+  gl.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 2, 1, 0, GL_RGB, GL_UNSIGNED_BYTE,
+                texels);
+  gl.PixelStorei(GL_UNPACK_ALIGNMENT, 4);
+  gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  gl.Enable(GL_TEXTURE_2D);
+  return texture;
+}
+
+static void TexturedQuad(void) {
+  static const GLfloat kCorners[] = {0, 0, 1, 0, 1, 1, 0, 1};
+  gl.Begin(GL_QUADS);
+  for (int i = 0; i < 8; i += 2) {
+    gl.TexCoord2f(kCorners[i], kCorners[i + 1]);
+    gl.Vertex2f(20.0f * kCorners[i], 10.0f * kCorners[i + 1]);
+  }
+  gl.End();
+}
+
+static void TestMultitexture(int width, int height) {
+  static const GLubyte kRedWhite[] = {255, 0, 0, 255, 255, 255};
+  static const GLubyte kGrayYellow[] = {128, 128, 128, 255, 255, 0};
+  static const GLfloat kConstant[] = {0.25f, 0.5f, 0.75f, 0.5f};
+  static const GLfloat kVertices[] = {0, 0, 20, 0, 20, 10, 0, 10};
+  static const GLfloat kGrayTexcoords[] = {0.25f, 0.5f, 0.25f, 0.5f,
+                                           0.25f, 0.5f, 0.25f, 0.5f};
+  static const GLfloat kPoints[] = {0, 0, 0, 1, 1, 1};
+  Multitexture arb;
+#define SOFTGPU_LOAD(ret, name, params) \
+  arb.name = (ret(APIENTRY*) params)Proc("gl" #name);
+  SOFTGPU_ARB_MULTITEXTURE(SOFTGPU_LOAD)
+#undef SOFTGPU_LOAD
+  const char* extensions = (const char*)gl.GetString(GL_EXTENSIONS);
+  Expect(strstr(extensions, "GL_ARB_multitexture ") &&
+             strstr(extensions, "GL_ARB_texture_env_combine ") &&
+             strstr(extensions, "GL_EXT_texture_env_add "),
+         "multitexture extensions listed");
+  Expect(Integer(GL_MAX_TEXTURE_UNITS_ARB) == 2, "two texture units");
+  PixelSpace(width, height);
+  GLuint textures[2];
+  textures[0] = Texture2x1(kRedWhite);
+  gl.TexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+  arb.ActiveTextureARB(GL_TEXTURE1_ARB);
+  textures[1] = Texture2x1(kGrayYellow);
+  arb.MultiTexCoord2fARB(GL_TEXTURE1_ARB, 0.75f, 0.5f);
+  TexturedQuad();
+  ExpectColor(5, 5, RGB(255, 0, 0));
+  ExpectColor(15, 5, RGB(255, 255, 0));
+  gl.TexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_ADD);
+  arb.MultiTexCoord2fARB(GL_TEXTURE1_ARB, 0.25f, 0.5f);
+  TexturedQuad();
+  ExpectColor(5, 5, RGB(255, 128, 128));
+  arb.MultiTexCoord2fARB(GL_TEXTURE1_ARB, 0.75f, 0.5f);
+
+  gl.TexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE_ARB);
+  gl.TexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB_ARB, GL_INTERPOLATE_ARB);
+  gl.TexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB_ARB, GL_CONSTANT_ARB);
+  gl.TexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, kConstant);
+  TexturedQuad();
+  ExpectColor(5, 5, RGB(159, 64, 96));
+  gl.TexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB_ARB, GL_MODULATE);
+  gl.TexEnvi(GL_TEXTURE_ENV, GL_RGB_SCALE_ARB, 2);
+  TexturedQuad();
+  ExpectColor(15, 5, RGB(128, 255, 255));
+  gl.TexEnvi(GL_TEXTURE_ENV, GL_RGB_SCALE_ARB, 1);
+  gl.TexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB_ARB, GL_SUBTRACT_ARB);
+  gl.TexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB_ARB, GL_PRIMARY_COLOR_ARB);
+  gl.TexEnvi(GL_TEXTURE_ENV, GL_SOURCE1_RGB_ARB, GL_TEXTURE);
+  gl.TexEnvi(GL_TEXTURE_ENV, GL_OPERAND1_RGB_ARB, GL_ONE_MINUS_SRC_COLOR);
+  gl.Color3f(1.0f, 0.25f, 1.0f);
+  TexturedQuad();
+  ExpectColor(5, 5, RGB(255, 64, 0));
+  GLint value;
+  gl.GetTexEnviv(GL_TEXTURE_ENV, GL_SOURCE2_RGB_ARB, &value);
+  Expect(value == GL_CONSTANT_ARB, "combine source query");
+  gl.TexEnvi(GL_TEXTURE_ENV, GL_RGB_SCALE_ARB, 3);
+  ExpectError(GL_INVALID_VALUE, "combine scale");
+  gl.TexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_ALPHA_ARB, GL_SRC_COLOR);
+  ExpectError(GL_INVALID_ENUM, "color operand for alpha");
+  gl.TexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+  gl.Color3f(1.0f, 1.0f, 1.0f);
+
+  arb.ActiveTextureARB(GL_TEXTURE1_ARB + 1);
+  ExpectError(GL_INVALID_ENUM, "third texture unit");
+  gl.Map1f(GL_MAP1_VERTEX_3, 0.0f, 1.0f, 3, 2, kPoints);
+  ExpectError(GL_INVALID_OPERATION, "evaluator map outside unit 0");
+  gl.PushAttrib(GL_TEXTURE_BIT);
+  arb.ActiveTextureARB(GL_TEXTURE0_ARB);
+  gl.Disable(GL_TEXTURE_2D);
+  gl.PopAttrib();
+  Expect(Integer(GL_ACTIVE_TEXTURE_ARB) == (GLint)GL_TEXTURE1_ARB,
+         "active texture restored");
+  GLuint list = gl.GenLists(1);
+  gl.NewList(list, GL_COMPILE);
+  arb.ActiveTextureARB(GL_TEXTURE0_ARB);
+  gl.EndList();
+  Expect(Integer(GL_ACTIVE_TEXTURE_ARB) == (GLint)GL_TEXTURE1_ARB,
+         "listed active texture compiled");
+  gl.CallList(list);
+  gl.DeleteLists(list, 1);
+  Expect(Integer(GL_ACTIVE_TEXTURE_ARB) == (GLint)GL_TEXTURE0_ARB &&
+             gl.IsEnabled(GL_TEXTURE_2D) &&
+             Integer(GL_TEXTURE_BINDING_2D) == (GLint)textures[0],
+         "unit 0 state");
+
+  arb.ClientActiveTextureARB(GL_TEXTURE1_ARB);
+  gl.PushClientAttrib(GL_CLIENT_VERTEX_ARRAY_BIT);
+  gl.EnableClientState(GL_TEXTURE_COORD_ARRAY);
+  gl.TexCoordPointer(2, GL_FLOAT, 0, kGrayTexcoords);
+  arb.ClientActiveTextureARB(GL_TEXTURE0_ARB);
+  Expect(!gl.IsEnabled(GL_TEXTURE_COORD_ARRAY), "texture arrays per unit");
+  gl.EnableClientState(GL_VERTEX_ARRAY);
+  gl.VertexPointer(2, GL_FLOAT, 0, kVertices);
+  gl.TexCoord2f(0.25f, 0.5f);
+  gl.DrawArrays(GL_QUADS, 0, 4);
+  ExpectColor(10, 5, RGB(128, 0, 0));
+  gl.PopClientAttrib();
+  Expect(Integer(GL_CLIENT_ACTIVE_TEXTURE_ARB) == (GLint)GL_TEXTURE1_ARB &&
+             !gl.IsEnabled(GL_TEXTURE_COORD_ARRAY),
+         "client attributes per unit");
+  arb.ClientActiveTextureARB(GL_TEXTURE0_ARB);
+  gl.DisableClientState(GL_VERTEX_ARRAY);
+
+  gl.Disable(GL_TEXTURE_2D);
+  arb.ActiveTextureARB(GL_TEXTURE1_ARB);
+  gl.Disable(GL_TEXTURE_2D);
+  arb.ActiveTextureARB(GL_TEXTURE0_ARB);
+  gl.TexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+  gl.DeleteTextures(2, textures);
+  ExpectError(GL_NO_ERROR, "multitexture");
+}
+
 int main(void) {
   HMODULE icd = GetModuleHandleA("softgpu.dll");
   for (size_t i = 0; i < sizeof(kExports) / sizeof(kExports[0]); i++) {
@@ -837,6 +978,7 @@ int main(void) {
   TestBuffers(rect.right, rect.bottom);
   TestWindows(hdc, context);
   TestTextures();
+  TestMultitexture(rect.right, rect.bottom);
 
   DrvReleaseContext(context);
   DrvDeleteContext(context);

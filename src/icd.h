@@ -397,7 +397,78 @@
   X(void, PopClientAttrib, (void))                                             \
   X(void, PushClientAttrib, (GLbitfield mask))
 
+#define SOFTGPU_ARB_MULTITEXTURE(X)                                        \
+  X(void, ActiveTextureARB, (GLenum texture))                              \
+  X(void, ClientActiveTextureARB, (GLenum texture))                        \
+  X(void, MultiTexCoord1dARB, (GLenum texture, GLdouble s))                \
+  X(void, MultiTexCoord1dvARB, (GLenum texture, const GLdouble* v))        \
+  X(void, MultiTexCoord1fARB, (GLenum texture, GLfloat s))                 \
+  X(void, MultiTexCoord1fvARB, (GLenum texture, const GLfloat* v))         \
+  X(void, MultiTexCoord1iARB, (GLenum texture, GLint s))                   \
+  X(void, MultiTexCoord1ivARB, (GLenum texture, const GLint* v))           \
+  X(void, MultiTexCoord1sARB, (GLenum texture, GLshort s))                 \
+  X(void, MultiTexCoord1svARB, (GLenum texture, const GLshort* v))         \
+  X(void, MultiTexCoord2dARB, (GLenum texture, GLdouble s, GLdouble t))    \
+  X(void, MultiTexCoord2dvARB, (GLenum texture, const GLdouble* v))        \
+  X(void, MultiTexCoord2fARB, (GLenum texture, GLfloat s, GLfloat t))      \
+  X(void, MultiTexCoord2fvARB, (GLenum texture, const GLfloat* v))         \
+  X(void, MultiTexCoord2iARB, (GLenum texture, GLint s, GLint t))          \
+  X(void, MultiTexCoord2ivARB, (GLenum texture, const GLint* v))           \
+  X(void, MultiTexCoord2sARB, (GLenum texture, GLshort s, GLshort t))      \
+  X(void, MultiTexCoord2svARB, (GLenum texture, const GLshort* v))         \
+  X(void, MultiTexCoord3dARB,                                              \
+    (GLenum texture, GLdouble s, GLdouble t, GLdouble r))                  \
+  X(void, MultiTexCoord3dvARB, (GLenum texture, const GLdouble* v))        \
+  X(void, MultiTexCoord3fARB,                                              \
+    (GLenum texture, GLfloat s, GLfloat t, GLfloat r))                     \
+  X(void, MultiTexCoord3fvARB, (GLenum texture, const GLfloat* v))         \
+  X(void, MultiTexCoord3iARB, (GLenum texture, GLint s, GLint t, GLint r)) \
+  X(void, MultiTexCoord3ivARB, (GLenum texture, const GLint* v))           \
+  X(void, MultiTexCoord3sARB,                                              \
+    (GLenum texture, GLshort s, GLshort t, GLshort r))                     \
+  X(void, MultiTexCoord3svARB, (GLenum texture, const GLshort* v))         \
+  X(void, MultiTexCoord4dARB,                                              \
+    (GLenum texture, GLdouble s, GLdouble t, GLdouble r, GLdouble q))      \
+  X(void, MultiTexCoord4dvARB, (GLenum texture, const GLdouble* v))        \
+  X(void, MultiTexCoord4fARB,                                              \
+    (GLenum texture, GLfloat s, GLfloat t, GLfloat r, GLfloat q))          \
+  X(void, MultiTexCoord4fvARB, (GLenum texture, const GLfloat* v))         \
+  X(void, MultiTexCoord4iARB,                                              \
+    (GLenum texture, GLint s, GLint t, GLint r, GLint q))                  \
+  X(void, MultiTexCoord4ivARB, (GLenum texture, const GLint* v))           \
+  X(void, MultiTexCoord4sARB,                                              \
+    (GLenum texture, GLshort s, GLshort t, GLshort r, GLshort q))          \
+  X(void, MultiTexCoord4svARB, (GLenum texture, const GLshort* v))
+
 #include <GL/gl.h>
+
+#define GL_TEXTURE0_ARB 0x84C0
+#define GL_TEXTURE1_ARB 0x84C1
+#define GL_ACTIVE_TEXTURE_ARB 0x84E0
+#define GL_CLIENT_ACTIVE_TEXTURE_ARB 0x84E1
+#define GL_MAX_TEXTURE_UNITS_ARB 0x84E2
+#define GL_SUBTRACT_ARB 0x84E7
+#define GL_COMBINE_ARB 0x8570
+#define GL_COMBINE_RGB_ARB 0x8571
+#define GL_COMBINE_ALPHA_ARB 0x8572
+#define GL_RGB_SCALE_ARB 0x8573
+#define GL_ADD_SIGNED_ARB 0x8574
+#define GL_INTERPOLATE_ARB 0x8575
+#define GL_CONSTANT_ARB 0x8576
+#define GL_PRIMARY_COLOR_ARB 0x8577
+#define GL_PREVIOUS_ARB 0x8578
+#define GL_SOURCE0_RGB_ARB 0x8580
+#define GL_SOURCE1_RGB_ARB 0x8581
+#define GL_SOURCE2_RGB_ARB 0x8582
+#define GL_SOURCE0_ALPHA_ARB 0x8588
+#define GL_SOURCE1_ALPHA_ARB 0x8589
+#define GL_SOURCE2_ALPHA_ARB 0x858A
+#define GL_OPERAND0_RGB_ARB 0x8590
+#define GL_OPERAND1_RGB_ARB 0x8591
+#define GL_OPERAND2_RGB_ARB 0x8592
+#define GL_OPERAND0_ALPHA_ARB 0x8598
+#define GL_OPERAND1_ALPHA_ARB 0x8599
+#define GL_OPERAND2_ALPHA_ARB 0x859A
 
 #define SOFTGPU_ENTRY(ret, name, params) kGl##name,
 typedef enum GlEntry { SOFTGPU_GL11(SOFTGPU_ENTRY) kGlEntryCount } GlEntry;
