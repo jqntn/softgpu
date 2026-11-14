@@ -1333,8 +1333,8 @@ static void ApplyFog(const Context* context, float eye_z, float color[4]) {
   }
 }
 
-static float Factor(GLenum factor, const float source[4],
-                    const float destination[4], int channel) {
+static SOFTGPU_INLINE float Factor(GLenum factor, const float source[4],
+                                   const float destination[4], int channel) {
   switch (factor) {
     case GL_ONE:
       return 1.0f;
@@ -1361,8 +1361,8 @@ static float Factor(GLenum factor, const float source[4],
   }
 }
 
-static uint32_t Blend(const Context* context, uint32_t pixel,
-                      const float color[4]) {
+static SOFTGPU_INLINE uint32_t Blend(const Context* context, uint32_t pixel,
+                                     const float color[4]) {
   float destination[4];
   PixelColor(pixel, destination);
   float blended[4];
