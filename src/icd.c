@@ -1066,27 +1066,18 @@ static int CompleteLevels(const Texture* texture, bool one_dimensional) {
   return count;
 }
 
-static const uint8_t* Texel(const Sampler* sampler, const Level* level, int i,
-                            int j) {
-  const TextureParameters* parameters = &sampler->texture->parameters;
-  int border_x = level->border;
-  int border_y = sampler->one_dimensional ? 0 : level->border;
-  int width = LevelWidth(level);
-  int height = LevelHeight(level, sampler->one_dimensional);
-  if (parameters->wrap_s == GL_REPEAT) {
-    i &= width - 1;
-  } else if (i < -border_x || i >= width + border_x) {
-    return sampler->border;
+static int TexelIndex(int i, int size, int border, GLenum wrap) {
+  if (wrap == GL_REPEAT) {
+    return (i & (size - 1)) + border;
   }
-  if (sampler->one_dimensional) {
-    j = 0;
-  } else if (parameters->wrap_t == GL_REPEAT) {
-    j &= height - 1;
-  } else if (j < -border_y || j >= height + border_y) {
-    return sampler->border;
-  }
-  return level->texels[(size_t)(j + border_y) * (size_t)level->width +
-                       (size_t)(i + border_x)];
+  return i < -border || i >= size + border ? -1 : i + border;
+}
+
+static const uint8_t* Texel(const Sampler* sampler, const Level* level, int x,
+                            int y) {
+  return x < 0 || y < 0
+             ? sampler->border
+             : level->texels[(size_t)y * (size_t)level->width + (size_t)x];
 }
 
 static void SampleLevel(const Sampler* sampler, const Level* level,
@@ -1094,17 +1085,22 @@ static void SampleLevel(const Sampler* sampler, const Level* level,
   const TextureParameters* parameters = &sampler->texture->parameters;
   int width = LevelWidth(level);
   int height = LevelHeight(level, sampler->one_dimensional);
+  int border_y = sampler->one_dimensional ? 0 : level->border;
+  GLenum wrap_t = sampler->one_dimensional ? GL_REPEAT : parameters->wrap_t;
   s = parameters->wrap_s == GL_REPEAT ? s - Floor(s) : Clamp01(s);
   if (sampler->one_dimensional) {
     t = 0.5f;
   } else {
-    t = parameters->wrap_t == GL_REPEAT ? t - Floor(t) : Clamp01(t);
+    t = wrap_t == GL_REPEAT ? t - Floor(t) : Clamp01(t);
   }
   float u = s * (float)width;
   float v = t * (float)height;
   if (filter == GL_NEAREST) {
-    const uint8_t* p = Texel(sampler, level, MinInt((int)u, width - 1),
-                             MinInt((int)v, height - 1));
+    const uint8_t* p =
+        Texel(sampler, level,
+              TexelIndex(MinInt((int)u, width - 1), width, level->border,
+                         parameters->wrap_s),
+              TexelIndex(MinInt((int)v, height - 1), height, border_y, wrap_t));
     for (int i = 0; i < 4; i++) {
       texel[i] = (float)p[i] / 255.0f;
     }
@@ -1116,12 +1112,14 @@ static void SampleLevel(const Sampler* sampler, const Level* level,
   float bottom = Floor(v);
   float a = u - left;
   float b = v - bottom;
-  int i0 = (int)left;
-  int j0 = (int)bottom;
-  const uint8_t* p00 = Texel(sampler, level, i0, j0);
-  const uint8_t* p10 = Texel(sampler, level, i0 + 1, j0);
-  const uint8_t* p01 = Texel(sampler, level, i0, j0 + 1);
-  const uint8_t* p11 = Texel(sampler, level, i0 + 1, j0 + 1);
+  int x0 = TexelIndex((int)left, width, level->border, parameters->wrap_s);
+  int x1 = TexelIndex((int)left + 1, width, level->border, parameters->wrap_s);
+  int y0 = TexelIndex((int)bottom, height, border_y, wrap_t);
+  int y1 = TexelIndex((int)bottom + 1, height, border_y, wrap_t);
+  const uint8_t* p00 = Texel(sampler, level, x0, y0);
+  const uint8_t* p10 = Texel(sampler, level, x1, y0);
+  const uint8_t* p01 = Texel(sampler, level, x0, y1);
+  const uint8_t* p11 = Texel(sampler, level, x1, y1);
   for (int i = 0; i < 4; i++) {
     float lower = (float)p00[i] + ((float)p10[i] - (float)p00[i]) * a;
     float upper = (float)p01[i] + ((float)p11[i] - (float)p01[i]) * a;
