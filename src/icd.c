@@ -1229,14 +1229,25 @@ static float CombineFunction(GLenum function, const float a[3]) {
   }
 }
 
+static int CombineArgumentCount(GLenum function) {
+  switch (function) {
+    case GL_REPLACE:
+      return 1;
+    case GL_INTERPOLATE_ARB:
+      return 3;
+    default:
+      return 2;
+  }
+}
+
 static void ApplyCombine(const TextureUnit* unit, const float texel[4],
                          const float primary[4], float color[4]) {
   float previous[4];
   memcpy(previous, color, sizeof(previous));
   for (int channel = 0; channel < 4; channel++) {
     const Combiner* combiner = channel == kAlpha ? &unit->alpha : &unit->rgb;
-    float a[3];
-    for (int i = 0; i < 3; i++) {
+    float a[3] = {0};
+    for (int i = 0; i < CombineArgumentCount(combiner->function); i++) {
       a[i] = CombineArgument(combiner->source[i], combiner->operand[i], channel,
                              unit, texel, primary, previous);
     }
