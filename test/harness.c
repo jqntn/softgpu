@@ -732,6 +732,34 @@ static void TestWindows(HDC hdc, ULONG context) {
   ExpectError(GL_NO_ERROR, "windows");
 }
 
+static void TestSingleBuffer(HDC hdc, ULONG context) {
+  HWND window = CreateWindowA("softgpu", "softgpu", WS_OVERLAPPEDWINDOW, 0, 0,
+                              64, 64, NULL, NULL, NULL, NULL);
+  HDC single_hdc = GetDC(window);
+  PIXELFORMATDESCRIPTOR descriptor;
+  DrvDescribePixelFormat(single_hdc, 3, sizeof(descriptor), &descriptor);
+  ULONG single = DrvCreateContext(single_hdc);
+  Expect(!(descriptor.dwFlags & PFD_DOUBLEBUFFER) &&
+             DrvSetPixelFormat(single_hdc, 3) &&
+             DrvSetContext(single_hdc, single, NULL) != NULL,
+         "single-buffered window");
+  Expect(Integer(GL_DOUBLEBUFFER) == 0 && Integer(GL_DRAW_BUFFER) == GL_FRONT &&
+             Integer(GL_READ_BUFFER) == GL_FRONT,
+         "single-buffered defaults");
+  gl.DrawBuffer(GL_BACK);
+  ExpectError(GL_INVALID_OPERATION, "no back buffer to draw");
+  gl.ReadBuffer(GL_BACK_LEFT);
+  ExpectError(GL_INVALID_OPERATION, "no back buffer to read");
+  gl.ClearColor(0.0f, 1.0f, 0.0f, 1.0f);
+  gl.Clear(GL_COLOR_BUFFER_BIT);
+  Expect(DrvSwapBuffers(single_hdc), "single-buffered swap");
+  ExpectColor(5, 5, RGB(0, 255, 0));
+  DrvDeleteContext(single);
+  ReleaseDC(window, single_hdc);
+  DestroyWindow(window);
+  Expect(DrvSetContext(hdc, context, NULL) != NULL, "double-buffered window");
+}
+
 static void TestTextures(void) {
   static const GLubyte kBordered[] = {0, 0, 255, 0,   0, 255, 0, 0, 255,
                                       0, 0, 255, 255, 0, 0,   0, 0, 255,
@@ -981,6 +1009,7 @@ int main(void) {
   TestFragmentOps(rect.right, rect.bottom);
   TestBuffers(rect.right, rect.bottom);
   TestWindows(hdc, context);
+  TestSingleBuffer(hdc, context);
   TestTextures();
   TestMultitexture(rect.right, rect.bottom);
 

@@ -14,8 +14,8 @@ _Static_assert(kGlEntryCount == 336, "GL 1.1 has 336 dispatch entries");
 enum {
   kMaxContexts = 64,
   kMaxFramebuffers = 64,
-  kPixelFormatCount = 2,
-  kAccumFormat = 2,
+  kPixelFormatCount = 4,
+  kSingleBufferedFormat = 3,
   kChannelBits = 8,
   kDepthBits = 24,
   kStencilBits = 8,
@@ -319,6 +319,7 @@ typedef struct Framebuffer {
   uint8_t* stencil;
   int16_t* accum;
   bool front_dirty;
+  bool single_buffered;
   bool accumulation;
   int swap_interval;
 } Framebuffer;
@@ -7351,15 +7352,21 @@ static void APIENTRY IndexMask(GLuint mask) {
   context->state.color.index_writemask = mask;
 }
 
-static bool IsMissingBuffer(GLenum buffer) {
+static bool IsMissingBuffer(const Context* context, GLenum buffer) {
   return buffer == GL_FRONT_RIGHT || buffer == GL_BACK_RIGHT ||
-         buffer == GL_RIGHT || (buffer >= GL_AUX0 && buffer <= GL_AUX3);
+         buffer == GL_RIGHT || (buffer >= GL_AUX0 && buffer <= GL_AUX3) ||
+         (context->framebuffer->single_buffered &&
+          (buffer == GL_BACK || buffer == GL_BACK_LEFT));
 }
 
 static void APIENTRY DrawBuffer(GLenum mode) {
   Context* context = current;
   if (Record(context, kOpDrawBuffer, (Arg[]){{.u = mode}}, 1) ||
       InsideBeginEnd(context)) {
+    return;
+  }
+  if (IsMissingBuffer(context, mode)) {
+    SetError(context, GL_INVALID_OPERATION);
     return;
   }
   switch (mode) {
@@ -7373,8 +7380,7 @@ static void APIENTRY DrawBuffer(GLenum mode) {
       context->state.color.draw_buffer = mode;
       return;
     default:
-      SetError(context,
-               IsMissingBuffer(mode) ? GL_INVALID_OPERATION : GL_INVALID_ENUM);
+      SetError(context, GL_INVALID_ENUM);
   }
 }
 
@@ -7382,6 +7388,10 @@ static void APIENTRY ReadBuffer(GLenum mode) {
   Context* context = current;
   if (Record(context, kOpReadBuffer, (Arg[]){{.u = mode}}, 1) ||
       InsideBeginEnd(context)) {
+    return;
+  }
+  if (IsMissingBuffer(context, mode)) {
+    SetError(context, GL_INVALID_OPERATION);
     return;
   }
   switch (mode) {
@@ -7393,8 +7403,7 @@ static void APIENTRY ReadBuffer(GLenum mode) {
       context->state.pixel.read_buffer = mode;
       return;
     default:
-      SetError(context,
-               IsMissingBuffer(mode) ? GL_INVALID_OPERATION : GL_INVALID_ENUM);
+      SetError(context, GL_INVALID_ENUM);
   }
 }
 
@@ -8784,8 +8793,9 @@ static int StateValues(Context* context, GLenum pname, double values[16],
     case GL_INDEX_BITS:
       return Number(values, 0);
     case GL_RGBA_MODE:
-    case GL_DOUBLEBUFFER:
       return Number(values, 1);
+    case GL_DOUBLEBUFFER:
+      return Number(values, !context->framebuffer->single_buffered);
     case GL_POINT_SIZE_RANGE:
     case GL_LINE_WIDTH_RANGE:
       return Pair(values, 1, kMaxPointSize);
@@ -9709,6 +9719,7 @@ static void FreeFramebuffer(Framebuffer* framebuffer) {
   free(framebuffer->stencil);
   free(framebuffer->accum);
   *framebuffer = (Framebuffer){.window = framebuffer->window,
+                               .single_buffered = framebuffer->single_buffered,
                                .accumulation = framebuffer->accumulation,
                                .swap_interval = framebuffer->swap_interval};
 }
@@ -9782,12 +9793,14 @@ LONG APIENTRY DrvDescribePixelFormat(HDC hdc, INT format, ULONG size,
   if (format < 1 || format > kPixelFormatCount || size < sizeof(*descriptor)) {
     return 0;
   }
-  int accum_bits = format == kAccumFormat ? kAccumBits : 0;
+  int accum_bits = format % 2 == 0 ? kAccumBits : 0;
+  DWORD buffering =
+      format < kSingleBufferedFormat ? PFD_DOUBLEBUFFER | PFD_SWAP_COPY : 0;
   *descriptor = (PIXELFORMATDESCRIPTOR){
       .nSize = sizeof(*descriptor),
       .nVersion = 1,
-      .dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER |
-                 PFD_SWAP_COPY | PFD_SUPPORT_COMPOSITION,
+      .dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | buffering |
+                 PFD_SUPPORT_COMPOSITION,
       .iPixelType = PFD_TYPE_RGBA,
       .cColorBits = 32,
       .cRedBits = kChannelBits,
@@ -9815,7 +9828,8 @@ BOOL APIENTRY DrvSetPixelFormat(HDC hdc, LONG format) {
   if (!framebuffer || format < 1 || format > kPixelFormatCount) {
     return FALSE;
   }
-  framebuffer->accumulation = format == kAccumFormat;
+  framebuffer->single_buffered = format >= kSingleBufferedFormat;
+  framebuffer->accumulation = format % 2 == 0;
   return TRUE;
 }
 
@@ -9905,6 +9919,10 @@ ProcTable* APIENTRY DrvSetContext(HDC hdc, ULONG handle, PROC set_proc_table) {
     context->state.viewport.box[3] = framebuffer->height;
     context->state.scissor.box[2] = framebuffer->width;
     context->state.scissor.box[3] = framebuffer->height;
+    if (framebuffer->single_buffered) {
+      context->state.color.draw_buffer = GL_FRONT;
+      context->state.pixel.read_buffer = GL_FRONT;
+    }
   }
   current = context;
   return &table;
@@ -9971,7 +9989,7 @@ BOOL APIENTRY DrvSwapBuffers(HDC hdc) {
   if (!framebuffer) {
     return FALSE;
   }
-  if (framebuffer->back) {
+  if (framebuffer->back && !framebuffer->single_buffered) {
     memcpy(framebuffer->front, framebuffer->back,
            (size_t)framebuffer->width * (size_t)framebuffer->height *
                sizeof(uint32_t));
