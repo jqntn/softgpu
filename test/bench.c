@@ -61,13 +61,7 @@ static ULONG_PTR PerformanceCores(void) {
 }
 
 static void UsePerformanceCores(void) {
-  PROCESS_POWER_THROTTLING_STATE throttling = {
-      .Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION,
-      .ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
-  };
-  if (!SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling,
-                             &throttling, sizeof(throttling)) ||
-      !SetProcessAffinityMask(GetCurrentProcess(), PerformanceCores())) {
+  if (!SetProcessAffinityMask(GetCurrentProcess(), PerformanceCores())) {
     Fail("cannot keep the benchmark on the performance cores");
   }
 }

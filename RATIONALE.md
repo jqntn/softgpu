@@ -57,7 +57,7 @@ softgpu is a software OpenGL driver for Windows, in plain C. Its goal is to run 
 - **wgltest** and the samples need softgpu installed, so CI only builds them.
 - **Piglit.** Its OpenGL 1.0, 1.1 and WGL groups pass, except tests that use later features without checking the version.
 - **Install.** The scripts keep the original driver names, so uninstall can restore them, unless a driver update already replaced softgpu. Display devices restart, because Windows caches the name. The scripts must run in Windows PowerShell 5.1 and PowerShell 7.
-- **Benchmarks.** `bench` and `scripts\quake-bench.ps1` run unseen, on the performance cores with power throttling off, since Windows slows unfocused programs. The Quake script runs a copy of QuakeSpasm without the sleep it takes when unfocused. Results repeat within 1%.
+- **Benchmarks.** `bench` and `scripts\quake-bench.ps1` run unseen and pinned to the performance cores, since Windows moves unfocused programs to efficiency cores. The Quake script runs a copy of QuakeSpasm without the sleep it takes when unfocused. Results repeat within 1%.
 
 ## Direction
 
