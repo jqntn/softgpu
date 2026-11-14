@@ -816,6 +816,29 @@ static void TexturedQuad(void) {
   gl.End();
 }
 
+static void TestClampEdges(int width, int height) {
+  static const GLubyte kRed[] = {255, 0, 0, 255, 0, 0};
+  static const GLfloat kBlue[] = {0.0f, 0.0f, 1.0f, 0.0f};
+  static const GLfloat kEdges[] = {1.0f, 0.5f, 0.25f, 1.0f};
+  PixelSpace(width, height);
+  GLuint texture = Texture2x1(kRed);
+  gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+  gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+  gl.TexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, kBlue);
+  gl.TexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+  for (int i = 0; i < 4; i += 2) {
+    gl.TexCoord2f(kEdges[i], kEdges[i + 1]);
+    gl.Rectf(0.0f, 0.0f, 20.0f, 10.0f);
+    ExpectColor(5, 5, RGB(128, 0, 128));
+  }
+  gl.TexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+  gl.Disable(GL_TEXTURE_2D);
+  gl.DeleteTextures(1, &texture);
+  ExpectError(GL_NO_ERROR, "clamped edges blend the border");
+}
+
 static void TestMultitexture(int width, int height) {
   static const GLubyte kRedWhite[] = {255, 0, 0, 255, 255, 255};
   static const GLubyte kGrayYellow[] = {128, 128, 128, 255, 255, 0};
@@ -1011,6 +1034,7 @@ int main(void) {
   TestWindows(hdc, context);
   TestSingleBuffer(hdc, context);
   TestTextures();
+  TestClampEdges(rect.right, rect.bottom);
   TestMultitexture(rect.right, rect.bottom);
 
   DrvReleaseContext(context);

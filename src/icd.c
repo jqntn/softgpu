@@ -1075,14 +1075,14 @@ static const uint8_t* Texel(const Sampler* sampler, const Level* level, int i,
   int height = LevelHeight(level, sampler->one_dimensional);
   if (parameters->wrap_s == GL_REPEAT) {
     i &= width - 1;
+  } else if (i < -border_x || i >= width + border_x) {
+    return sampler->border;
   }
   if (sampler->one_dimensional) {
     j = 0;
   } else if (parameters->wrap_t == GL_REPEAT) {
     j &= height - 1;
-  }
-  if (i < -border_x || i >= width + border_x || j < -border_y ||
-      j >= height + border_y) {
+  } else if (j < -border_y || j >= height + border_y) {
     return sampler->border;
   }
   return level->texels[(size_t)(j + border_y) * (size_t)level->width +
