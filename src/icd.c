@@ -1425,7 +1425,9 @@ static SOFTGPU_INLINE void WriteColor(const Context* context,
     } else if (state->blend) {
       value = Blend(context, *pixel, color);
     }
-    *pixel = (*pixel & ~targets->mask) | (value & targets->mask);
+    *pixel = targets->mask == UINT32_MAX
+                 ? value
+                 : (*pixel & ~targets->mask) | (value & targets->mask);
   }
 }
 
