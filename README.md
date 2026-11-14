@@ -37,6 +37,8 @@ softgpu then drives every OpenGL app until uninstalled or until a GPU driver upd
 
 This project aims for the speed of [llvmpipe](https://gitlab.freedesktop.org/mesa/mesa/-/tree/main/src/gallium/drivers/llvmpipe) and the simplicity of [softpipe](https://gitlab.freedesktop.org/mesa/mesa/-/tree/main/src/gallium/drivers/softpipe): readable C, no JIT. MSVC is the primary optimization target.
 
+`scripts\quake-bench.ps1 -Game <QuakeSpasm folder>` times Quake with the installed driver without taking focus.
+
 ## Supported games
 
 - Quake, through [QuakeSpasm](https://quakespasm.sourceforge.net/) 0.97.0, 32-bit and 64-bit.
