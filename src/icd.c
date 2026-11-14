@@ -9,6 +9,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _MSC_VER
+#define SOFTGPU_INLINE __forceinline
+#else
+#define SOFTGPU_INLINE inline __attribute__((always_inline))
+#endif
+
 _Static_assert(kGlEntryCount == 336, "GL 1.1 has 336 dispatch entries");
 
 enum {
@@ -1080,8 +1086,9 @@ static const uint8_t* Texel(const Sampler* sampler, const Level* level, int x,
              : level->texels[(size_t)y * (size_t)level->width + (size_t)x];
 }
 
-static void SampleLevel(const Sampler* sampler, const Level* level,
-                        GLenum filter, float s, float t, float texel[4]) {
+static SOFTGPU_INLINE void SampleLevel(const Sampler* sampler,
+                                       const Level* level, GLenum filter,
+                                       float s, float t, float texel[4]) {
   const TextureParameters* parameters = &sampler->texture->parameters;
   int width = LevelWidth(level);
   int height = LevelHeight(level, sampler->one_dimensional);
@@ -1127,8 +1134,9 @@ static void SampleLevel(const Sampler* sampler, const Level* level,
   }
 }
 
-static void SampleTexture(const Sampler* sampler, float s, float t,
-                          float lambda, float texel[4]) {
+static SOFTGPU_INLINE void SampleTexture(const Sampler* sampler, float s,
+                                         float t, float lambda,
+                                         float texel[4]) {
   const Texture* texture = sampler->texture;
   GLenum minify = texture->parameters.min_filter;
   GLenum magnify = texture->parameters.mag_filter;
@@ -1389,8 +1397,9 @@ static uint32_t ApplyLogicOp(GLenum op, uint32_t s, uint32_t d) {
   }
 }
 
-static void WriteColor(const Context* context, const Targets* targets,
-                       size_t index, const float color[4]) {
+static SOFTGPU_INLINE void WriteColor(const Context* context,
+                                      const Targets* targets, size_t index,
+                                      const float color[4]) {
   const ColorState* state = &context->state.color;
   uint32_t source = PackColor(color);
   for (int i = 0; i < targets->count; i++) {
@@ -1442,9 +1451,10 @@ static bool DepthPass(const Context* context, size_t index, float z) {
                  context->framebuffer->depth[index]);
 }
 
-static void WriteFragment(Context* context, const Primitive* primitive,
-                          size_t index, float z, bool depth_pass,
-                          const float color[4]) {
+static SOFTGPU_INLINE void WriteFragment(Context* context,
+                                         const Primitive* primitive,
+                                         size_t index, float z, bool depth_pass,
+                                         const float color[4]) {
   const State* state = &context->state;
   if (state->color.alpha_test &&
       !Compare(state->color.alpha_func, color[kAlpha],
@@ -1473,10 +1483,10 @@ static void WriteFragment(Context* context, const Primitive* primitive,
   WriteColor(context, &primitive->targets, index, color);
 }
 
-static void ShadeColor(const Context* context, const Primitive* primitive,
-                       const float values[kVaryings],
-                       const TextureLookup lookups[kTextureUnits],
-                       float coverage, float color[4]) {
+static SOFTGPU_INLINE void ShadeColor(
+    const Context* context, const Primitive* primitive,
+    const float values[kVaryings], const TextureLookup lookups[kTextureUnits],
+    float coverage, float color[4]) {
   memcpy(color, values, 4 * sizeof(float));
   for (int unit = 0; unit < kTextureUnits; unit++) {
     const Sampler* sampler = &primitive->samplers[unit];
