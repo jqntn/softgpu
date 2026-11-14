@@ -55,7 +55,7 @@ softgpu is a software OpenGL driver for Windows, in plain C. Its goal is to run 
 
 - **harness** plays the part of `opengl32.dll`, so CI can run it without installing the driver.
 - **wgltest** and the samples need softgpu installed, so CI only builds them.
-- **Piglit.** Its OpenGL 1.0, 1.1 and WGL groups pass, except tests that use later features without checking the version: BGR and packed pixel types, compressed, depth and depth-stencil formats, `GL_GENERATE_MIPMAP`, texture depth and stencil size queries, 3D and cube map targets, scalar forms of vector parameters, and luminance from `glGetTexImage` as red alone. GL 1.1 rejects all of these or, for the last, sums red, green and blue as `glReadPixels` does.
+- **Piglit.** Its OpenGL 1.0, 1.1 and WGL groups pass, except tests that use later features without checking the version: BGR and packed pixel types, compressed, depth and depth-stencil formats, `GL_GENERATE_MIPMAP`, texture depth and stencil size queries, aliased line and point width ranges, 3D and cube map targets, scalar forms of vector parameters, and luminance from `glGetTexImage` as red alone. GL 1.1 rejects all of these or, for the last, sums red, green and blue as `glReadPixels` does.
 - **Install.** The scripts keep the original driver names as `Softgpu<Name>` values beside them and keep each value's registry type. A second install keeps the first backup. Uninstall leaves a name alone when a driver update already replaced softgpu. `restart.ps1` restarts the display devices, because of the cached name. The scripts must run in Windows PowerShell 5.1 and PowerShell 7.
 - **Benchmarks.** Time Release builds in a focused window. QuakeSpasm sleeps 16 ms per frame without input focus.
 
