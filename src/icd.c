@@ -1171,6 +1171,10 @@ static SOFTGPU_INLINE void SampleTexture(const Sampler* sampler, float s,
   }
 }
 
+static float LevelOfDetail(float rho) {
+  return rho <= 1.0f ? 0.0f : 0.5f * log2f(rho);
+}
+
 static float TextureScale(const Sampler* sampler, int axis) {
   const Level* base = sampler->texture->levels;
   if (axis == 0) {
@@ -1191,7 +1195,7 @@ static float Lambda(const Setup* setup, int unit, float s, float t,
     float dv = (d[1] - t * d[2]) * inverse_q * height;
     rho = MaxFloat(du * du + dv * dv, rho);
   }
-  return 0.5f * log2f(rho);
+  return LevelOfDetail(rho);
 }
 
 static float CombineArgument(GLenum source, GLenum operand, int channel,
@@ -1818,7 +1822,7 @@ static float LineLambda(const Primitive* primitive, int unit, const Corner* a,
   float dt = (to[kT] - from[kT] - tt * dq) / q;
   float du = ds * TextureScale(sampler, 0) / length;
   float dv = dt * TextureScale(sampler, 1) / length;
-  return 0.5f * log2f(du * du + dv * dv);
+  return LevelOfDetail(du * du + dv * dv);
 }
 
 static bool LineStippleBit(const Context* context, int counter) {
