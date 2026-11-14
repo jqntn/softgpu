@@ -14,7 +14,8 @@ _Static_assert(kGlEntryCount == 336, "GL 1.1 has 336 dispatch entries");
 enum {
   kMaxContexts = 64,
   kMaxFramebuffers = 64,
-  kPixelFormatCount = 1,
+  kPixelFormatCount = 2,
+  kAccumFormat = 2,
   kChannelBits = 8,
   kDepthBits = 24,
   kStencilBits = 8,
@@ -318,6 +319,7 @@ typedef struct Framebuffer {
   uint8_t* stencil;
   int16_t* accum;
   bool front_dirty;
+  bool accumulation;
   int swap_interval;
 } Framebuffer;
 
@@ -7492,7 +7494,10 @@ static void APIENTRY Clear(GLbitfield mask) {
   uint32_t color = PackColor(context->state.color.clear);
   bool depth = (mask & GL_DEPTH_BUFFER_BIT) && context->state.depth.mask;
   bool stencil = mask & GL_STENCIL_BUFFER_BIT;
-  int16_t* accum = mask & GL_ACCUM_BUFFER_BIT ? AccumBuffer(context) : NULL;
+  int16_t* accum =
+      (mask & GL_ACCUM_BUFFER_BIT) && context->framebuffer->accumulation
+          ? AccumBuffer(context)
+          : NULL;
   int16_t accum_clear[4];
   for (int c = 0; c < 4; c++) {
     accum_clear[c] = ToAccum(context->state.accum_clear[c]);
@@ -7527,6 +7532,10 @@ static void APIENTRY Accum(GLenum op, GLfloat value) {
   if (op != GL_ACCUM && op != GL_LOAD && op != GL_RETURN && op != GL_MULT &&
       op != GL_ADD) {
     SetError(context, GL_INVALID_ENUM);
+    return;
+  }
+  if (!context->framebuffer->accumulation) {
+    SetError(context, GL_INVALID_OPERATION);
     return;
   }
   int16_t* accum = AccumBuffer(context);
@@ -8796,7 +8805,8 @@ static int StateValues(Context* context, GLenum pname, double values[16],
     case GL_ACCUM_GREEN_BITS:
     case GL_ACCUM_BLUE_BITS:
     case GL_ACCUM_ALPHA_BITS:
-      return Number(values, kAccumBits);
+      return Number(values,
+                    context->framebuffer->accumulation ? kAccumBits : 0);
     case GL_LIST_BASE:
       return Number(values, s->list_base);
     case GL_LIST_INDEX:
@@ -9699,6 +9709,7 @@ static void FreeFramebuffer(Framebuffer* framebuffer) {
   free(framebuffer->stencil);
   free(framebuffer->accum);
   *framebuffer = (Framebuffer){.window = framebuffer->window,
+                               .accumulation = framebuffer->accumulation,
                                .swap_interval = framebuffer->swap_interval};
 }
 
@@ -9771,6 +9782,7 @@ LONG APIENTRY DrvDescribePixelFormat(HDC hdc, INT format, ULONG size,
   if (format < 1 || format > kPixelFormatCount || size < sizeof(*descriptor)) {
     return 0;
   }
+  int accum_bits = format == kAccumFormat ? kAccumBits : 0;
   *descriptor = (PIXELFORMATDESCRIPTOR){
       .nSize = sizeof(*descriptor),
       .nVersion = 1,
@@ -9785,11 +9797,11 @@ LONG APIENTRY DrvDescribePixelFormat(HDC hdc, INT format, ULONG size,
       .cBlueBits = kChannelBits,
       .cAlphaBits = kChannelBits,
       .cAlphaShift = 24,
-      .cAccumBits = 4 * kAccumBits,
-      .cAccumRedBits = kAccumBits,
-      .cAccumGreenBits = kAccumBits,
-      .cAccumBlueBits = kAccumBits,
-      .cAccumAlphaBits = kAccumBits,
+      .cAccumBits = 4 * accum_bits,
+      .cAccumRedBits = accum_bits,
+      .cAccumGreenBits = accum_bits,
+      .cAccumBlueBits = accum_bits,
+      .cAccumAlphaBits = accum_bits,
       .cDepthBits = kDepthBits,
       .cStencilBits = kStencilBits,
       .iLayerType = PFD_MAIN_PLANE,
@@ -9798,7 +9810,13 @@ LONG APIENTRY DrvDescribePixelFormat(HDC hdc, INT format, ULONG size,
 }
 
 BOOL APIENTRY DrvSetPixelFormat(HDC hdc, LONG format) {
-  return format >= 1 && format <= kPixelFormatCount;
+  HWND window = WindowFromDC(hdc);
+  Framebuffer* framebuffer = window ? FindFramebuffer(window) : NULL;
+  if (!framebuffer || format < 1 || format > kPixelFormatCount) {
+    return FALSE;
+  }
+  framebuffer->accumulation = format == kAccumFormat;
+  return TRUE;
 }
 
 ULONG APIENTRY DrvCreateContext(HDC hdc) {

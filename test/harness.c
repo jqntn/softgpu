@@ -615,6 +615,7 @@ static void TestAccum(int width, int height) {
   gl.Clear(GL_COLOR_BUFFER_BIT);
   gl.Accum(GL_RETURN, 1.0f);
   ExpectColor(5, 5, RGB(128, 64, 0));
+  Expect(Integer(GL_ACCUM_RED_BITS) == 16, "accumulation bits");
   ExpectError(GL_NO_ERROR, "accumulation");
 }
 
@@ -715,6 +716,9 @@ static void TestWindows(HDC hdc, ULONG context) {
          "second window");
   gl.ClearColor(1.0f, 0.0f, 0.0f, 1.0f);
   gl.Clear(GL_COLOR_BUFFER_BIT);
+  Expect(Integer(GL_ACCUM_RED_BITS) == 0, "first format has no accumulation");
+  gl.Accum(GL_LOAD, 1.0f);
+  ExpectError(GL_INVALID_OPERATION, "accumulation without a buffer");
   ULONG other = DrvCreateContext(hdc);
   Expect(DrvSetContext(hdc, other, NULL) != NULL, "second context");
   ExpectColor(5, 5, RGB(0, 0, 255));
@@ -924,8 +928,8 @@ int main(void) {
 
   PIXELFORMATDESCRIPTOR descriptor;
   if (!DrvValidateVersion(1) ||
-      DrvDescribePixelFormat(hdc, 1, sizeof(descriptor), &descriptor) < 1 ||
-      !DrvSetPixelFormat(hdc, 1)) {
+      DrvDescribePixelFormat(hdc, 2, sizeof(descriptor), &descriptor) < 2 ||
+      descriptor.cAccumBits == 0 || !DrvSetPixelFormat(hdc, 2)) {
     Fail("no pixel format");
   }
   ULONG context = DrvCreateContext(hdc);
